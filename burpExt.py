@@ -104,6 +104,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         # TODO 1 Capture Port 80 Request
         
         
+        
         self._log.add(LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl()))
         self.fireTableRowsInserted(row, row)
 
@@ -148,6 +149,20 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
     def getResponse(self):
         return self._currentlyDisplayedItem.getResponse()
 
+    #
+	# @params IParameter Type
+	#
+	def paramType(self, type):
+		plist = {
+			IParameter.PARAM_BODY: '[Body]',
+			IParameter.PARAM_COOKIE: '[Cookie]',
+			IParameter.PARAM_JSON: '[Json]',
+			IParameter.PARAM_MULTIPART_ATTR: '[Multipart]',
+			IParameter.PARAM_XML: '[Xml]',
+			IParameter.PARAM_XML_ATTR: '[Xml Attr]'
+		}
+		return plist[type]
+        
 #
 # extend JTable to handle cell selection
 #   
