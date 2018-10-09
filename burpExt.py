@@ -1,3 +1,5 @@
+# Development Branch
+
 from burp import IBurpExtender
 from burp import ITab
 from burp import IProxyListener
@@ -79,8 +81,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         
     #
     # implement IProxyListener(boolean messageIsRequest, IInterceptedProxyMessage message)
-    #   IInterceptedProxyMessage to get IHttpRequestResponse use getMessageInfo()
-    
+    #               |------> IInterceptedProxyMessage to get IHttpRequestResponse use getMessageInfo()
     def processProxyMessage(self, messageIsRequest, message):
     # message have to be in scope first
         if self._callbacks.isInScope(URL(message.getMessageInfo().getHttpService().toString())) :
@@ -90,15 +91,21 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 
             # create a new log entry with the message details
             self._lock.acquire()
-            row = self._log.size()
-            
-            self._log.add(LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl()))
-            self.fireTableRowsInserted(row, row)
-            
+            self.logMessage(message)    
             self._lock.release()
         
-    
-    
+    #
+    # Log the HTTPMessage if falls into requirements
+    #
+    def logMessage(self, message):
+        row = self._log.size()
+        
+        
+        # TODO 1 Capture Port 80 Request
+        
+        
+        self._log.add(LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl()))
+        self.fireTableRowsInserted(row, row)
 
     #
     # extend AbstractTableModel
