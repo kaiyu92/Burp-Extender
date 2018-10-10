@@ -4,6 +4,9 @@ from burp import IBurpExtender
 from burp import ITab
 from burp import IProxyListener
 from burp import IMessageEditorController
+from burp import IParameter
+from burp import IRequestInfo
+from burp import IResponseInfo
 from java.awt import Component;
 from java.io import PrintWriter;
 from java.util import ArrayList;
@@ -100,13 +103,13 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
     def logMessage(self, message):
         row = self._log.size()
         
+        requestInfo = self._helpers.analyzeRequest(message.messageInfo.getHttpService() , message.messageInfo.getRequest())
+        responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
         
-        # TODO 1 Capture Port 80 Request
-        
-        
-        
-        self._log.add(LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl()))
-        self.fireTableRowsInserted(row, row)
+        # TODO 1 Capture Port 80 Request   
+        if (message.getMessageInfo().getHttpService().getPort() == 80):
+            self._log.add(LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl()))
+            self.fireTableRowsInserted(row, row)
 
     #
     # extend AbstractTableModel
@@ -163,6 +166,11 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
 		}
 		return plist[type]
         
+    def requirementType(self, req):
+        rList ={
+        
+        }
+        return rList[req]
 #
 # extend JTable to handle cell selection
 #   
@@ -185,7 +193,8 @@ class Table(JTable):
 # class to hold details of each log entry
 #
 class LogEntry:
-    def __init__(self, tool, requestResponse, url):
+    def __init__(self, tool, requestResponse, url, req):
         self._tool = tool
         self._requestResponse = requestResponse
         self._url = url
+        self._req = req
