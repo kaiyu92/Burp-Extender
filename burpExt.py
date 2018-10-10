@@ -40,7 +40,10 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         # create the log and a lock on which to synchronize when adding log entries
         self._log = ArrayList()
         self._lock = Lock()
-        self._requirement = ArrayList()
+        
+        # obtain our output stream
+        self._stdout = PrintWriter(callbacks.getStdout(), True)
+        self._stderr = PrintWriter(callbacks.getStderr(), True)
         
         # main split pane
         self._splitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
@@ -77,7 +80,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
     #
     
     def getTabCaption(self):
-        return "GovTech Scanner"
+        return "Development Scanner"
     
     def getUiComponent(self):
         return self._splitpane
@@ -105,9 +108,45 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         
         requestInfo = self._helpers.analyzeRequest(message.messageInfo.getHttpService() , message.messageInfo.getRequest())
         responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
+        headerList = responseInfo.getHeaders()
+        toLog = False
         
-        # TODO 1 Capture Port 80 Request   
+        # Capture Port 80 Request   
         if (message.getMessageInfo().getHttpService().getPort() == 80):
+            self._stdout.println("Send on 80 :" + message.getMessageInfo().getHttpService().getHost())
+            toLog = True
+            
+        
+
+        for header in headerList: 
+            tokens = header.split(":")
+            # Capture information if there is a server response header
+            if "server" in header.lower() and len(tokens[1]) != 1:
+                self._stdout.println("Server Details:" + tokens[1])
+                toLog = True
+            
+            # Capture information if there is a server information leakage
+            if "x-powered-by" in header.lower() and len(tokens[1]) != 1:
+                self._stdout.println("Web Server powered by :" + tokens[1])
+                toLog = True
+            
+            
+            # Check for security headers that enforces security endpoint web browsers
+            # Reference to: https://www.owasp.org/index.php/REST_Security_Cheat_Sheet
+            #
+            if "x-content-type-options" in header.lower() and tokens[1] !=  " nosniff":
+                self._stdout.println("Potential XSS content type")
+                toLog = True
+                
+            if "x-frame-options" in header.lower() and ( tokens[1] !=  " deny" or tokens[1] != " SAMEORIGIN" ):
+                self._stdout.println("Web vulneranle to  drag'n drop clickjacking attacks in older browsers")
+                toLog = True
+            
+            if "content-type" in header.lower() and ("text/html" not in token[1]) :
+                self._stdout.println("Malicious content type headers in your response")
+                toLog = True
+            
+        if(toLog):
             self._log.add(LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl()))
             self.fireTableRowsInserted(row, row)
 
@@ -140,8 +179,8 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
 
     #
     # implement IMessageEditorController
-    # this allows our request/response viewers to obtain details about the messages being displayed
-    #
+    #    # this allows our request/response viewers to obtain details about the messages being displayed
+
     
     def getHttpService(self):
         return self._currentlyDisplayedItem.getHttpService()
@@ -165,12 +204,23 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
 			IParameter.PARAM_XML_ATTR: '[Xml Attr]'
 		}
 		return plist[type]
+
+
+#
+# Object Class for requirment
+#
+class Requirements:
+    def __init__(self):
+        self.UNENCRYPTED_CHANNEL = False
         
-    def requirementType(self, req):
-        rList ={
-            
-        }
-        return rList[req]
+    def flagUnencrypted(self):
+        self.UNENCRYPTED_CHANNEL = True
+        
+    def checkFlagUnencrypted(self):
+        if (self.UNENCRYPTED_CHANNEL):
+            return "UNENCRYPTED_CHANNEL"
+        return
+        
 #
 # extend JTable to handle cell selection
 #   
@@ -197,4 +247,3 @@ class LogEntry:
         self._tool = tool
         self._requestResponse = requestResponse
         self._url = url
-        #self._req = req
