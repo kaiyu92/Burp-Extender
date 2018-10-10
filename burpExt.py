@@ -35,7 +35,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._helpers = callbacks.getHelpers()
         
         # set our extension name
-        callbacks.setExtensionName("GovTech Scanner Beta")
+        callbacks.setExtensionName("Scanner Beta")
         
         # create the log and a lock on which to synchronize when adding log entries
         self._log = ArrayList()
@@ -168,7 +168,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         
     def requirementType(self, req):
         rList ={
-        
+            
         }
         return rList[req]
 #
@@ -193,8 +193,8 @@ class Table(JTable):
 # class to hold details of each log entry
 #
 class LogEntry:
-    def __init__(self, tool, requestResponse, url, req):
+    def __init__(self, tool, requestResponse, url):
         self._tool = tool
         self._requestResponse = requestResponse
         self._url = url
-        self._req = req
+        #self._req = req
