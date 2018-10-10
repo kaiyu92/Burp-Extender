@@ -35,24 +35,26 @@ class BurpExtender(IBurpExtender, IProxyListener):
         self._stdout.println('Loaded Extension.')
         
     #
-    # implement IProxyListener
-    #            
+    # implement IProxyListener(boolean messageIsRequest, IInterceptedProxyMessage message)
+    #            |------> IInterceptedProxyMessage to get IHttpRequestResponse use getMessageInfo() 
     def processProxyMessage(self, messageIsRequest, message):
+
+                
         # message have to be in scope first
         if self._callbacks.isInScope(URL(message.getMessageInfo().getHttpService().toString())) :
-            self._lock.acquire()
-            self._stdout.println("Message ID# :" + str(message.getMessageReference()))
+        
+            if (message.getMessageInfo().getHttpService().getPort() == 80):
+                self._stdout.println("Send on 80 :" + message.getMessageInfo().getHttpService().getHost())
+        
+            #self._stdout.println("Message ID# :" + str(message.getMessageReference()))
             # check if message is an request
             if messageIsRequest:
-                self._stdout.println("OUTGOING REQUEST")
                 requestInfo = self._helpers.analyzeRequest(message.messageInfo.getHttpService() , message.messageInfo.getRequest())
-                self._stdout.println(("HTTP request to " + str(requestInfo.getUrl())))
+                #self._stdout.println(("HTTP request to " + str(requestInfo.getUrl())))
             else:
-                self._stdout.println("INCOMING RESPONSE")
                 responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
-                self._stdout.println("HTTP response header :" + str(responseInfo.getStatusCode()))
-            self._lock.release()
-        
+                #self._stdout.println("Response header :" + str(responseInfo.getStatusCode()))
+                
     #
 	# @params IParameter Type
 	#

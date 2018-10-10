@@ -4,6 +4,9 @@ from burp import IBurpExtender
 from burp import ITab
 from burp import IProxyListener
 from burp import IMessageEditorController
+from burp import IParameter
+from burp import IRequestInfo
+from burp import IResponseInfo
 from java.awt import Component;
 from java.io import PrintWriter;
 from java.util import ArrayList;
@@ -32,7 +35,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._helpers = callbacks.getHelpers()
         
         # set our extension name
-        callbacks.setExtensionName("GovTech Scanner Beta")
+        callbacks.setExtensionName("Scanner Beta")
         
         # create the log and a lock on which to synchronize when adding log entries
         self._log = ArrayList()
@@ -100,12 +103,13 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
     def logMessage(self, message):
         row = self._log.size()
         
+        requestInfo = self._helpers.analyzeRequest(message.messageInfo.getHttpService() , message.messageInfo.getRequest())
+        responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
         
-        # TODO 1 Capture Port 80 Request
-        
-        
-        self._log.add(LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl()))
-        self.fireTableRowsInserted(row, row)
+        # TODO 1 Capture Port 80 Request   
+        if (message.getMessageInfo().getHttpService().getPort() == 80):
+            self._log.add(LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl()))
+            self.fireTableRowsInserted(row, row)
 
     #
     # extend AbstractTableModel
@@ -148,6 +152,25 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
     def getResponse(self):
         return self._currentlyDisplayedItem.getResponse()
 
+    #
+	# @params IParameter Type
+	#
+	def paramType(self, type):
+		plist = {
+			IParameter.PARAM_BODY: '[Body]',
+			IParameter.PARAM_COOKIE: '[Cookie]',
+			IParameter.PARAM_JSON: '[Json]',
+			IParameter.PARAM_MULTIPART_ATTR: '[Multipart]',
+			IParameter.PARAM_XML: '[Xml]',
+			IParameter.PARAM_XML_ATTR: '[Xml Attr]'
+		}
+		return plist[type]
+        
+    def requirementType(self, req):
+        rList ={
+            
+        }
+        return rList[req]
 #
 # extend JTable to handle cell selection
 #   
@@ -174,3 +197,4 @@ class LogEntry:
         self._tool = tool
         self._requestResponse = requestResponse
         self._url = url
+        #self._req = req
