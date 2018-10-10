@@ -4,6 +4,7 @@ from burp import IParameter
 from burp import IRequestInfo
 from burp import IResponseInfo
 from burp import IProxyListener
+from burp import ICookie
 from burp import IInterceptedProxyMessage
 from threading import Lock
 
@@ -46,13 +47,14 @@ class BurpExtender(IBurpExtender, IProxyListener):
                 #self._stdout.println(("HTTP request to " + str(requestInfo.getUrl())))
             else:
                 responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
-                headerList = responseInfo.getHeaders()
-                for header in headerList: 
-                    tokens = header.split(":")
-                    if "server" in header.lower() and len(tokens[1]) != 1:
-                            self._stdout.println("Server Details:" + tokens[1])
-                            #self._stdout.println("Server length:" + str(len(tokens[1])))
-
+                cookieInfo = responseInfo.getCookies()
+                for cookie in cookieInfo:
+                    self._stdout.println("Cookie Domain :" + str(cookie.getDomain()))
+                    self._stdout.println("Cookie Expiration :" + str(cookie.getExpiration()))
+                    self._stdout.println("Cookie Name :" + str(cookie.getName()))
+                    self._stdout.println("Cookie Path :" + str(cookie.getPath()))
+                    self._stdout.println("Cookie Value :" + str(cookie.getValue()))
+                    self._stdout.println()
     #
 	# @params IParameter Type
 	#
@@ -120,6 +122,25 @@ class BurpExtender(IBurpExtender, IProxyListener):
             else:
                 responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
                 #self._stdout.println("Response header :" + str(responseInfo.getStatusCode()))
-                
+     
+        
+    # work done to capture server info leakage
+    def processProxyMessage(self, messageIsRequest, message):
+        # message have to be in scope first
+        if self._callbacks.isInScope(URL(message.getMessageInfo().getHttpService().toString())) :
+            # check if message is an request
+            if messageIsRequest:
+                requestInfo = self._helpers.analyzeRequest(message.messageInfo.getHttpService() , message.messageInfo.getRequest())
+                #self._stdout.println(("HTTP request to " + str(requestInfo.getUrl())))
+            else:
+                responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
+                headerList = responseInfo.getHeaders()
+                for header in headerList: 
+                    tokens = header.split(":")
+                    if "server" in header.lower() and len(tokens[1]) != 1:
+                            self._stdout.println("Server Details:" + tokens[1])
+                            #self._stdout.println("Server length:" + str(len(tokens[1])))
+
+    
                 
     '''

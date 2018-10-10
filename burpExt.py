@@ -7,6 +7,7 @@ from burp import IMessageEditorController
 from burp import IParameter
 from burp import IRequestInfo
 from burp import IResponseInfo
+from burp import ICookie
 from java.awt import Component;
 from java.io import PrintWriter;
 from java.util import ArrayList;
@@ -108,6 +109,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         
         requestInfo = self._helpers.analyzeRequest(message.messageInfo.getHttpService() , message.messageInfo.getRequest())
         responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
+        cookieInfo = responseInfo.getCookies()
         headerList = responseInfo.getHeaders()
         toLog = False
         
@@ -134,18 +136,25 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             # Check for security headers that enforces security endpoint web browsers
             # Reference to: https://www.owasp.org/index.php/REST_Security_Cheat_Sheet
             #
-            if "x-content-type-options" in header.lower() and tokens[1] !=  " nosniff":
+            if "x-content-type-options" == header.lower() and "nosniff" not in tokens[1].lower():
                 self._stdout.println("Potential XSS content type")
                 toLog = True
                 
-            if "x-frame-options" in header.lower() and ( tokens[1] !=  " deny" or tokens[1] != " SAMEORIGIN" ):
-                self._stdout.println("Web vulneranle to  drag'n drop clickjacking attacks in older browsers")
-                toLog = True
+            if "x-frame-options" == header.lower():
+                if "sameorigin" not in tokens[1].lower() or "deny" not in tokens[1].lower():
+                    self._stdout.println("Web vulneranle to  drag'n drop clickjacking attacks in older browsers")
+                    toLog = True
             
-            if "content-type" in header.lower() and ("text/html" not in token[1]) :
-                self._stdout.println("Malicious content type headers in your response")
-                toLog = True
-            
+            if "content-type" == header.lower(): 
+                if "text/html" not in tokens[1].lower():
+                    self._stdout.println("Potential malicious content type headers in your response")
+                    self._stdout.println(str(tokens[1]))
+                    self._stdout.println()
+                    toLog = True
+         
+        # Capture Cookie 
+
+         
         if(toLog):
             self._log.add(LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl()))
             self.fireTableRowsInserted(row, row)
