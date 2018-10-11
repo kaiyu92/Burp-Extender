@@ -122,7 +122,12 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             logMsg += "[+] Send on 80 :" + message.getMessageInfo().getHttpService().getHost() + "\n"
             toLog = True
             
-        
+            if responseInfo.getStatusCode() < 300:
+                logMsg += "[+] Server Return 2xx Success Message from a HTTP Request detected, potential sensitive information being transmitted over non-SSL connections\n"
+            elif ((responseInfo.getStatusCode() == 302) or (responseInfo.getStatusCode() == 301) or (responseInfo.getStatusCode() == 304) ) :
+                logMsg += "[+] Server Return "+ responseInfo.getStatusCode() +" Redirection Message from a HTTP Request detected\n"
+
+            
 
         for header in headerList: 
             tokens = header.split(":")
