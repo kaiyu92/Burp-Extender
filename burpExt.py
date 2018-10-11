@@ -18,6 +18,7 @@ from javax.swing import JTabbedPane;
 from javax.swing import JTable;
 from javax.swing import SwingUtilities;
 from javax.swing.table import AbstractTableModel;
+from javax.swing import JTextPane;
 from threading import Lock
 from java.net import URL
 
@@ -58,8 +59,11 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         tabs = JTabbedPane()
         self._requestViewer = callbacks.createMessageEditor(self, False)
         self._responseViewer = callbacks.createMessageEditor(self, False)
+        self._logMsgViewer = JTextPane()
+        self._logMsgViewer.setEditable(False)
         tabs.addTab("Request", self._requestViewer.getComponent())
         tabs.addTab("Response", self._responseViewer.getComponent())
+        tabs.addTab("Logged Flags", self._logMsgViewer)
         self._splitpane.setRightComponent(tabs)
         
         # customize our UI components
@@ -112,10 +116,10 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         cookieInfo = responseInfo.getCookies()
         headerList = responseInfo.getHeaders()
         toLog = False
-        
+        logMsg = "";
         # Capture Port 80 Request   
         if (message.getMessageInfo().getHttpService().getPort() == 80):
-            self._stdout.println("Send on 80 :" + message.getMessageInfo().getHttpService().getHost())
+            logMsg += "[+] Send on 80 :" + message.getMessageInfo().getHttpService().getHost() + "\n"
             toLog = True
             
         
@@ -124,12 +128,12 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             tokens = header.split(":")
             # Capture information if there is a server response header
             if "server" in header.lower() and len(tokens[1]) != 1:
-                self._stdout.println("Server Details:" + tokens[1])
+                logMsg += "[+] Potential Server Details:" + tokens[1] + "\n"
                 toLog = True
             
             # Capture information if there is a server information leakage
             if "x-powered-by" in header.lower() and len(tokens[1]) != 1:
-                self._stdout.println("Web Server powered by :" + tokens[1])
+                logMsg += "[+] Web Server powered by :" + tokens[1] + "\n"
                 toLog = True
             
             
@@ -137,26 +141,27 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             # Reference to: https://www.owasp.org/index.php/REST_Security_Cheat_Sheet
             #
             if "x-content-type-options" == header.lower() and "nosniff" not in tokens[1].lower():
-                self._stdout.println("Potential XSS content type")
+                logMsg += "[+] Potential XSS content type\n"
                 toLog = True
                 
             if "x-frame-options" == header.lower():
                 if "sameorigin" not in tokens[1].lower() or "deny" not in tokens[1].lower():
-                    self._stdout.println("Web vulneranle to  drag'n drop clickjacking attacks in older browsers")
+                    logMsg += "[+] Web vulneranle to  drag'n drop clickjacking attacks in older browsers\n" 
                     toLog = True
             
             if "content-type" == header.lower(): 
                 if "text/html" not in tokens[1].lower():
-                    self._stdout.println("Potential malicious content type headers in your response")
-                    self._stdout.println(str(tokens[1]))
-                    self._stdout.println()
+                    logMsg += "[+] Potential malicious content type headers in your response\n"
                     toLog = True
          
         # Capture Cookie 
 
          
         if(toLog):
-            self._log.add(LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl()))
+            log = LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl(), logMsg)
+            self._log.add(log)
+            self._stdout.println(logMsg)
+            #self._stdout.println("new log entered: " + log._logMsg)
             self.fireTableRowsInserted(row, row)
 
     #
@@ -199,7 +204,8 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
 
     def getResponse(self):
         return self._currentlyDisplayedItem.getResponse()
-
+    
+    
     #
 	# @params IParameter Type
 	#
@@ -214,21 +220,6 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
 		}
 		return plist[type]
 
-
-#
-# Object Class for requirment
-#
-class Requirements:
-    def __init__(self):
-        self.UNENCRYPTED_CHANNEL = False
-        
-    def flagUnencrypted(self):
-        self.UNENCRYPTED_CHANNEL = True
-        
-    def checkFlagUnencrypted(self):
-        if (self.UNENCRYPTED_CHANNEL):
-            return "UNENCRYPTED_CHANNEL"
-        return
         
 #
 # extend JTable to handle cell selection
@@ -242,17 +233,19 @@ class Table(JTable):
     
         # show the log entry for the selected row
         logEntry = self._extender._log.get(row)
+        
+        self._extender._logMsgViewer.setText(logEntry._logMsg)
         self._extender._requestViewer.setMessage(logEntry._requestResponse.getRequest(), True)
         self._extender._responseViewer.setMessage(logEntry._requestResponse.getResponse(), False)
         self._extender._currentlyDisplayedItem = logEntry._requestResponse
-        
         JTable.changeSelection(self, row, col, toggle, extend)
     
 #
 # class to hold details of each log entry
 #
 class LogEntry:
-    def __init__(self, tool, requestResponse, url):
+    def __init__(self, tool, requestResponse, url,logMsg):
         self._tool = tool
         self._requestResponse = requestResponse
         self._url = url
+        self._logMsg = logMsg
