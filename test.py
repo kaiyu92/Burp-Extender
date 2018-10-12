@@ -47,14 +47,23 @@ class BurpExtender(IBurpExtender, IProxyListener):
                 #self._stdout.println(("HTTP request to " + str(requestInfo.getUrl())))
             else:
                 responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
-                cookieInfo = responseInfo.getCookies()
-                for cookie in cookieInfo:
-                    self._stdout.println("Cookie Domain :" + str(cookie.getDomain()))
-                    self._stdout.println("Cookie Expiration :" + str(cookie.getExpiration()))
-                    self._stdout.println("Cookie Name :" + str(cookie.getName()))
-                    self._stdout.println("Cookie Path :" + str(cookie.getPath()))
-                    self._stdout.println("Cookie Value :" + str(cookie.getValue()))
-                    self._stdout.println()
+                responseHeaderList = responseInfo.getHeaders()
+                
+                
+                for header in responseHeaderList:
+                    if "cookie" in header.lower():
+                        self._stdout.println(str(header))
+                        
+                        if ("secure" in header.lower() and "httponly" in header.lower()):
+                            self._stdout.println("Secure and HTTPOnly cookie flags are implemented")
+                        elif ("secure" in header.lower()):
+                            self._stdout.println("Secure cookie flags is implemented")
+                        elif ("httponly" in header.lower()):
+                            self._stdout.println("HTTPOnly cookie flags is implemented")
+                        else:
+                            self._stdout.println("No cookie flags implemented")
+                        self._stdout.println()
+
     #
 	# @params IParameter Type
 	#
