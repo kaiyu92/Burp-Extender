@@ -146,7 +146,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         if (message.getMessageInfo().getHttpService().getPort() == 80 and self._httpRequestFlag == False):
             logMsg += "[+] Send on 80 :" + message.getMessageInfo().getHttpService().getHost() + "\n"
             toLog = True
-            self._httpRequestFlag = True
+            #self._httpRequestFlag = True
             
             if responseInfo.getStatusCode() < 300 and responseInfo.getStatusCode() >= 200:
                 logMsg += "[+] Server Return 2xx Success Message from a HTTP Request detected, potential sensitive information being transmitted over non-SSL connections\n"
