@@ -5,6 +5,8 @@ from burp import IRequestInfo
 from burp import IResponseInfo
 from burp import IProxyListener
 from burp import ICookie
+from burp import IScanIssue
+from burp import IScannerListener
 from burp import IInterceptedProxyMessage
 from threading import Lock
 
@@ -13,7 +15,7 @@ from java.io import PrintWriter
 
 
 
-class BurpExtender(IBurpExtender, IProxyListener):
+class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
     def registerExtenderCallbacks( self, callbacks):
        
         # keep a reference to our callbacks object
@@ -30,12 +32,13 @@ class BurpExtender(IBurpExtender, IProxyListener):
         self._stderr = PrintWriter(callbacks.getStderr(), True)
         
         # register ourselves as a Proxy listener
-        callbacks.registerProxyListener(self)          # Done for now
+        #callbacks.registerProxyListener(self)          # Done for now
+        callbacks.registerScannerListener(self)
         
         
         self._stdout.println('Loaded Extension.')
         
-    #
+    # Work done on Cookie flag
     # implement IProxyListener(boolean messageIsRequest, IInterceptedProxyMessage message)
     #            |------> IInterceptedProxyMessage to get IHttpRequestResponse use getMessageInfo() 
     def processProxyMessage(self, messageIsRequest, message):
@@ -48,22 +51,12 @@ class BurpExtender(IBurpExtender, IProxyListener):
             else:
                 responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
                 responseHeaderList = responseInfo.getHeaders()
-                
-                
-                for header in responseHeaderList:
-                    if "cookie" in header.lower():
-                        self._stdout.println(str(header))
+            
+    # implement IscannerListener
+    def newScanIssue(self, issue):
+        background = issue.getIssueName()
+        self._stdout.println("New Scan Issue: " + background)                 
                         
-                        if ("secure" in header.lower() and "httponly" in header.lower()):
-                            self._stdout.println("Secure and HTTPOnly cookie flags are implemented")
-                        elif ("secure" in header.lower()):
-                            self._stdout.println("Secure cookie flags is implemented")
-                        elif ("httponly" in header.lower()):
-                            self._stdout.println("HTTPOnly cookie flags is implemented")
-                        else:
-                            self._stdout.println("No cookie flags implemented")
-                        self._stdout.println()
-
     #
 	# @params IParameter Type
 	#
@@ -77,7 +70,55 @@ class BurpExtender(IBurpExtender, IProxyListener):
 			IParameter.PARAM_XML_ATTR: '[Xml Attr]'
 		}
 		return plist[type]
-        
+ 
+
+#
+# class implementing IScanIssue to hold our custom scan issue details
+#
+class CustomScanIssue (IScanIssue):
+    def __init__(self, httpService, url, httpMessages, name, detail, severity):
+        self._httpService = httpService
+        self._url = url
+        self._httpMessages = httpMessages
+        self._name = name
+        self._detail = detail
+        self._severity = severity
+
+    def getUrl(self):
+        return self._url
+
+    def getIssueName(self):
+        return self._name
+
+    def getIssueType(self):
+        return 0
+
+    def getSeverity(self):
+        return self._severity
+
+    def getConfidence(self):
+        return "Certain"
+
+    def getIssueBackground(self):
+        pass
+
+    def getRemediationBackground(self):
+        pass
+
+    def getIssueDetail(self):
+        return self._detail
+
+    def getRemediationDetail(self):
+        pass
+
+    def getHttpMessages(self):
+        return self._httpMessages
+
+    def getHttpService(self):
+        return self._httpService
+
+
+ 
         
         
     '''
@@ -151,5 +192,62 @@ class BurpExtender(IBurpExtender, IProxyListener):
                             #self._stdout.println("Server length:" + str(len(tokens[1])))
 
     
+    # work done to capture scanner issues
+    # implement IProxyListener(boolean messageIsRequest, IInterceptedProxyMessage message)
+    #            |------> IInterceptedProxyMessage to get IHttpRequestResponse use getMessageInfo() 
+    def processProxyMessage(self, messageIsRequest, message):
+        # message have to be in scope first
+        if self._callbacks.isInScope(URL(message.getMessageInfo().getHttpService().toString())) :
+            # check if message is an request
+            if messageIsRequest:
+                requestInfo = self._helpers.analyzeRequest(message.messageInfo.getHttpService() , message.messageInfo.getRequest())
+                #self._stdout.println(("HTTP request to " + str(requestInfo.getUrl())))
+            else:
+                responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
+                responseHeaderList = responseInfo.getHeaders()
+                
+                
+                for header in responseHeaderList:
+                    if "cookie" in header.lower():
+                        self._stdout.println(str(header))
+                        
+                        if ("secure" in header.lower() and "httponly" in header.lower()):
+                            self._stdout.println("Secure and HTTPOnly cookie flags are implemented")
+                        elif ("secure" in header.lower()):
+                            self._stdout.println("Secure cookie flags is implemented")
+                        elif ("httponly" in header.lower()):
+                            self._stdout.println("HTTPOnly cookie flags is implemented")
+                        else:
+                            self._stdout.println("No cookie flags implemented")
+                        self._stdout.println()
+
+    # Work done on Cookie flag
+    # implement IProxyListener(boolean messageIsRequest, IInterceptedProxyMessage message)
+    #            |------> IInterceptedProxyMessage to get IHttpRequestResponse use getMessageInfo() 
+    def processProxyMessage(self, messageIsRequest, message):
+        # message have to be in scope first
+        if self._callbacks.isInScope(URL(message.getMessageInfo().getHttpService().toString())) :
+            # check if message is an request
+            if messageIsRequest:
+                requestInfo = self._helpers.analyzeRequest(message.messageInfo.getHttpService() , message.messageInfo.getRequest())
+                #self._stdout.println(("HTTP request to " + str(requestInfo.getUrl())))
+            else:
+                responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
+                responseHeaderList = responseInfo.getHeaders()
+                
+                
+                for header in responseHeaderList:
+                    if "cookie" in header.lower():
+                        self._stdout.println(str(header))
+                        
+                        if ("secure" in header.lower() and "httponly" in header.lower()):
+                            self._stdout.println("Secure and HTTPOnly cookie flags are implemented")
+                        elif ("secure" in header.lower()):
+                            self._stdout.println("Secure cookie flags is implemented")
+                        elif ("httponly" in header.lower()):
+                            self._stdout.println("HTTPOnly cookie flags is implemented")
+                        else:
+                            self._stdout.println("No cookie flags implemented")
+                        self._stdout.println()
                 
     '''
