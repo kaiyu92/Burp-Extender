@@ -16,7 +16,7 @@ from java.io import PrintWriter
 
 
 class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
-    def registerExtenderCallbacks( self, callbacks):
+    def registerExtenderCallbacks(self, callbacks):
        
         # keep a reference to our callbacks object
         self._callbacks = callbacks
@@ -34,10 +34,35 @@ class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
         # register ourselves as a Proxy listener
         #callbacks.registerProxyListener(self)          # Done for now
         callbacks.registerScannerListener(self)
-        
+               
+        # AUTO ADD TO SCOPE ------- TESTING PURPOSE ONLY
+        callbacks.includeInScope(URL("https://202.176.197.54"))
+        callbacks.includeInScope(URL("https://stg-home.singpass.gov.sg"))
+        self.getScanIssues()
         
         self._stdout.println('Loaded Extension.')
+     
+    def getScanIssues(self):
+        scannedIssues = self._callbacks.getScanIssues("http://204.197.157.18:8080")
+        self._stdout.println("Size of scanned issues on this url: " + str(len(scannedIssues)))
         
+        repeatedIssue = []
+
+        for issue in scannedIssues:
+            if issue.getIssueName() not in repeatedIssue: 
+                self._stdout.println(issue.getSeverity())
+                self._stdout.println(issue.getConfidence())
+                self._stdout.println("Issue Name: " + issue.getIssueName())
+                repeatedIssue.append(issue.getIssueName())
+                self._stdout.println()
+
+
+
+
+
+
+
+     
     # Work done on Cookie flag
     # implement IProxyListener(boolean messageIsRequest, IInterceptedProxyMessage message)
     #            |------> IInterceptedProxyMessage to get IHttpRequestResponse use getMessageInfo() 
@@ -54,9 +79,16 @@ class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
             
     # implement IscannerListener
     def newScanIssue(self, issue):
-        background = issue.getIssueName()
-        self._stdout.println("New Scan Issue: " + background)                 
-                        
+        self._stdout.println("Severity: " + issue.getSeverity())
+        self._stdout.println("Confidence: " + issue.getConfidence())   
+        self._stdout.println("Issue Name: " + issue.getIssueName())        
+        self._stdout.println("IssueBackground: " + issue.getIssueBackground())  
+        self._stdout.println("Details: " + issue.getIssueDetail())
+        self._stdout.println("Remediation Background: " + issue.getRemediationBackground())
+        self._stdout.println("Remediation Background: " + issue.getRemediationDetail())
+        
+        self._stdout.println()
+        
     #
 	# @params IParameter Type
 	#
@@ -70,55 +102,6 @@ class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
 			IParameter.PARAM_XML_ATTR: '[Xml Attr]'
 		}
 		return plist[type]
- 
-
-#
-# class implementing IScanIssue to hold our custom scan issue details
-#
-class CustomScanIssue (IScanIssue):
-    def __init__(self, httpService, url, httpMessages, name, detail, severity):
-        self._httpService = httpService
-        self._url = url
-        self._httpMessages = httpMessages
-        self._name = name
-        self._detail = detail
-        self._severity = severity
-
-    def getUrl(self):
-        return self._url
-
-    def getIssueName(self):
-        return self._name
-
-    def getIssueType(self):
-        return 0
-
-    def getSeverity(self):
-        return self._severity
-
-    def getConfidence(self):
-        return "Certain"
-
-    def getIssueBackground(self):
-        pass
-
-    def getRemediationBackground(self):
-        pass
-
-    def getIssueDetail(self):
-        return self._detail
-
-    def getRemediationDetail(self):
-        pass
-
-    def getHttpMessages(self):
-        return self._httpMessages
-
-    def getHttpService(self):
-        return self._httpService
-
-
- 
         
         
     '''

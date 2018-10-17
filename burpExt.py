@@ -31,10 +31,6 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
     #
     # implement IBurpExtender
     #
-    
-    # custom flags
-    
-    
     def	registerExtenderCallbacks(self, callbacks):
         # keep a reference to our callbacks object
         self._callbacks = callbacks
@@ -47,6 +43,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         
         # create the log and a lock on which to synchronize when adding log entries
         self._log = ArrayList()
+        self._scanLog = ArrayList()
         self._lock = Lock()
         
         # Custom logging flags
@@ -60,55 +57,74 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._stdout = PrintWriter(callbacks.getStdout(), True)
         self._stderr = PrintWriter(callbacks.getStderr(), True)
         
-
+        # customize our UI components
+        self._mainTab = JTabbedPane()
         
-        # main split pane
-        self._splitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
+        ############## Tab for Traffic logging split pane ############## 
+        self._trafficSplitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
         
         # table of log entries
-        logTable = Table(self)
+        self._data_model = dataModel()
+        logTable = Table(self._data_model)
         scrollPane = JScrollPane(logTable)
-        self._splitpane.setLeftComponent(scrollPane)
+        self._trafficSplitpane.setLeftComponent(scrollPane)
 
         # tabs with request/response viewers
-        tabs = JTabbedPane()
+        trafficTabs = JTabbedPane()
         self._requestViewer = callbacks.createMessageEditor(self, False)
         self._responseViewer = callbacks.createMessageEditor(self, False)
         self._logMsgViewer = JTextPane()
         self._logMsgViewer.setEditable(False)
-        tabs.addTab("Request", self._requestViewer.getComponent())
-        tabs.addTab("Response", self._responseViewer.getComponent())
-        tabs.addTab("Logged Flags", self._logMsgViewer)
-        self._splitpane.setRightComponent(tabs)
+        trafficTabs.addTab("Request", self._requestViewer.getComponent())
+        trafficTabs.addTab("Response", self._responseViewer.getComponent())
+        trafficTabs.addTab("Logged Flags", self._logMsgViewer)
+        self._trafficSplitpane.setRightComponent(trafficTabs)
+        self._mainTab.addTab("HTTP Traffic Logs", self._trafficSplitpane)
+        
+        #################################################################
         
 
-        self._mainTab = JTabbedPane()
-        self._mainTab.addTab("Logged HTTP Traffic", self._splitpane)
-        self._mainTab.addTab("TODO", self._splitpane)
- 
-        # customize our UI components
-        callbacks.customizeUiComponent(self._splitpane)
+        ############## Tab for Scanning logging split pane ############## 
+        self._scanningSplitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
       
+        # table of scanner entries
+        scanTable = ScanTable(self)
+        scanScrollPane = JScrollPane(scanTable)
+        self._scanningSplitpane.setLeftComponent(scanScrollPane)
+        
+        # tabs with request/response viewers
+        scannerTabs = JTabbedPane()
+        self._requestViewer2 = callbacks.createMessageEditor(self, False)
+        self._responseViewer2 = callbacks.createMessageEditor(self, False)
+        self._scanMsgViewer = JTextPane()
+        self._scanMsgViewer.setEditable(False)
+        scannerTabs.addTab("Advisory", self._scanMsgViewer)
+        scannerTabs.addTab("Request", self._requestViewer2.getComponent())
+        scannerTabs.addTab("Response", self._responseViewer2.getComponent())
+        self._scanningSplitpane.setRightComponent(scannerTabs)
+        self._mainTab.addTab("Scanner Logs", self._scanningSplitpane)
+        
+        #################################################################
+  
 
-        
+
         # add the custom tab to Burp's UI
-        callbacks.addSuiteTab(self)
-        
+        callbacks.addSuiteTab(self)  
+        callbacks.customizeUiComponent(self._mainTab)
+
         # register ourselves as a Proxy listener
-        callbacks.registerProxyListener(self)
-        
+        callbacks.registerProxyListener(self) 
         return
         
     #
     # implement ITab
     #
-    
     def getTabCaption(self):
         return "Development Scanner"
-    
+   
     def getUiComponent(self):
-        return self._splitpane
-        
+        return self._mainTab
+    
     #
     # implement IProxyListener(boolean messageIsRequest, IInterceptedProxyMessage message)
     #               |------> IInterceptedProxyMessage to get IHttpRequestResponse use getMessageInfo()
@@ -245,12 +261,38 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             log = LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl(), logMsg)
             self._log.add(log)
             self._stdout.println(logMsg)
-            self.fireTableRowsInserted(row, row)
-
-
+            self._data_model.fireTableRowsInserted(row, row)
+            
     #
-    # extend AbstractTableModel
+    # implement IMessageEditorController
+    #    # this allows our request/response viewers to obtain details about the messages being displayed
+
+    def getHttpService(self):
+        return self._currentlyDisplayedItem.getHttpService()
+
+    def getRequest(self):
+        return self._currentlyDisplayedItem.getRequest()
+
+    def getResponse(self):
+        return self._currentlyDisplayedItem.getResponse()
+
+      
+    
     #
+	# @params IParameter Type
+	#
+	def paramType(self, type):
+		plist = {
+			IParameter.PARAM_BODY: '[Body]',
+			IParameter.PARAM_COOKIE: '[Cookie]',
+			IParameter.PARAM_JSON: '[Json]',
+			IParameter.PARAM_MULTIPART_ATTR: '[Multipart]',
+			IParameter.PARAM_XML: '[Xml]',
+			IParameter.PARAM_XML_ATTR: '[Xml Attr]'
+		}
+		return plist[type]
+
+class dataModel(AbstractTableModel):
     def getRowCount(self):
         try:
             return self._log.size()
@@ -273,37 +315,8 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             return self._callbacks.getToolName(logEntry._tool)
         if columnIndex == 1:
             return logEntry._url.toString()
-        return ""
-
-    #
-    # implement IMessageEditorController
-    #    # this allows our request/response viewers to obtain details about the messages being displayed
-
-    
-    def getHttpService(self):
-        return self._currentlyDisplayedItem.getHttpService()
-
-    def getRequest(self):
-        return self._currentlyDisplayedItem.getRequest()
-
-    def getResponse(self):
-        return self._currentlyDisplayedItem.getResponse()
-    
-    
-    #
-	# @params IParameter Type
-	#
-	def paramType(self, type):
-		plist = {
-			IParameter.PARAM_BODY: '[Body]',
-			IParameter.PARAM_COOKIE: '[Cookie]',
-			IParameter.PARAM_JSON: '[Json]',
-			IParameter.PARAM_MULTIPART_ATTR: '[Multipart]',
-			IParameter.PARAM_XML: '[Xml]',
-			IParameter.PARAM_XML_ATTR: '[Xml Attr]'
-		}
-		return plist[type]
-
+        return ""          
+        
         
 #
 # extend JTable to handle cell selection
@@ -316,14 +329,67 @@ class Table(JTable):
     def changeSelection(self, row, col, toggle, extend):
     
         # show the log entry for the selected row
-        logEntry = self._extender._log.get(row)
-        
+        logEntry = self._extender._log.get(row)    
         self._extender._logMsgViewer.setText(logEntry._logMsg)
         self._extender._requestViewer.setMessage(logEntry._requestResponse.getRequest(), True)
         self._extender._responseViewer.setMessage(logEntry._requestResponse.getResponse(), False)
-        self._extender._currentlyDisplayedItem = logEntry._requestResponse
         JTable.changeSelection(self, row, col, toggle, extend)
+
+
+
+   
+class ScanTable(JTable):
+    def __init__(self, extender):
+        self._extender = extender
+        #self.setModel(extender)
+        
+    def changeSelection2(self, row, col, toggle, extend):
     
+        # show the log entry for the selected row
+        scanEntry = self._extender._scanLog.get(row)
+        self._extender._scanMsgViewer.setText(scanEntry._scanMsg)
+        self._extender._requestViewer2.setMessage(scanEntry._requestResponse.getRequest(), True)
+        self._extender._responseViewer2.setMessage(scanEntry._requestResponse.getResponse(), False)
+        JTable.changeSelection2(self, row, col, toggle, extend)
+    #
+    # extend AbstractTableModelfor scanner logs
+    #        
+    def getRowCount(self):
+        try:
+            return self._scanLog.size()
+        except:
+            return 0
+            
+    def getColumnCount(self):
+        return 5
+        
+    def getColumnName(self, columnIndex):
+        if columnIndex == 0:
+            return "ID"
+        if columnIndex == 1:
+            return "Severity"
+        if columnIndex == 2:
+            return "Issue Name"
+        if columnIndex == 3:
+            return "URL"
+        if columnIndex == 4:
+            return "Confidence"
+               
+    def getValueAt(self, rowIndex, columnIndex):
+        scanEntry = self._scanLog.get(rowIndex)
+        if columnIndex == 0:
+            return rowIndex
+        if columnIndex == 1:
+            return scanEntry._severity
+        if columnIndex == 2:
+            return scanEntry._issueName            
+        if columnIndex == 3:
+            return scanEntry._url.toString()
+        if columnIndex == 4:
+            return scanEntry._confidence   
+        return ""        
+
+        
 #
 # class to hold details of each log entry
 #
@@ -333,3 +399,16 @@ class LogEntry:
         self._requestResponse = requestResponse
         self._url = url
         self._logMsg = logMsg
+        
+#
+# class to hold details of each scanner entry
+#        
+class ScanEntry:
+    def __init__(self, requestResponse, severity, issueName, url, confidence, scanMsg):
+        self._requestResponse = requestResponse
+        self._severity = severity
+        self._issueName = issueName
+        self._url = url
+        sef._confidence = confidence
+        self._scanMsg = scanMsg
+               
