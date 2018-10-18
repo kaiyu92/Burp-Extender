@@ -1,32 +1,44 @@
 # Development Branch
-
-from burp import IBurpExtender
-from burp import ITab
-from burp import IProxyListener
-from burp import IMessageEditorController
-from burp import IParameter
-from burp import IRequestInfo
-from burp import IResponseInfo
-from burp import ICookie
-from java.awt import Component;
-from java.io import PrintWriter;
-from java.util import ArrayList;
-from java.util import List;
-from javax.swing import JScrollPane;
-from javax.swing import JSplitPane;
-from javax.swing import JTabbedPane;
-from javax.swing import JTable;
-from javax.swing import SwingUtilities;
-from javax.swing.table import AbstractTableModel;
-from javax.swing import JTextPane;
-from javax.swing import JPanel
-from threading import Lock
-from java.net import URL
-import base64
+try:
+    from burp import IBurpExtender
+    from burp import ITab
+    from burp import IProxyListener
+    from burp import IMessageEditorController
+    from burp import IParameter
+    from burp import IRequestInfo
+    from burp import IResponseInfo
+    from burp import ICookie
+    from burp import IScanIssue
+    from burp import IScannerListener
+    from java.awt import Component;
+    from java.io import PrintWriter;
+    from java.util import ArrayList;
+    from java.util import List;
+    from javax.swing import JScrollPane;
+    from javax.swing import JSplitPane;
+    from javax.swing import JTabbedPane;
+    from javax.swing import JTable;
+    from javax.swing import SwingUtilities;
+    from javax.swing.table import AbstractTableModel;
+    from javax.swing import JTextPane;
+    from javax.swing import JPanel
+    from javax.swing import JLabel
+    from javax.swing import JTextField
+    from javax.swing import JButton
+    from javax.swing import JButton
+    from javax.swing import SwingConstants
+    from javax.swing.border import EmptyBorder
+    from java.awt import (BorderLayout,FlowLayout)
+    from threading import Lock
+    from java.net import URL
+    import base64
+except ImportError as e:
+    print e
+    print "Failed to load dependencies. This issue maybe caused by using an unstable Jython version."
 #import re
 
 
-class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController, AbstractTableModel):
+class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController, IScannerListener):
     
     #
     # implement IBurpExtender
@@ -45,6 +57,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._log = ArrayList()
         self._scanLog = ArrayList()
         self._lock = Lock()
+        self._repeatedIssue = []
         
         # Custom logging flags
         self._secHeaderFlag = False
@@ -64,9 +77,9 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._trafficSplitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
         
         # table of log entries
-        self._data_model = dataModel()
-        logTable = Table(self._data_model)
-        scrollPane = JScrollPane(logTable)
+        self._logModel = logModel(self)
+        self._logTable = Table(self, self._logModel)
+        scrollPane = JScrollPane(self._logTable)
         self._trafficSplitpane.setLeftComponent(scrollPane)
 
         # tabs with request/response viewers
@@ -86,27 +99,51 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
 
         ############## Tab for Scanning logging split pane ############## 
         self._scanningSplitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
-      
+        self._internalScanningSplitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
+        self._topPanel = JPanel(BorderLayout(10, 10))
+        self._topPanel.setBorder(EmptyBorder(0, 0, 10, 0))
+        
         # table of scanner entries
-        scanTable = ScanTable(self)
-        scanScrollPane = JScrollPane(scanTable)
-        self._scanningSplitpane.setLeftComponent(scanScrollPane)
+        self._scanModel = scanModel(self)
+        self._scanTable = ScanTable(self, self._scanModel)
+        scanScrollPane = JScrollPane(self._scanTable)
+        scanScrollPane.setBorder(EmptyBorder(0, 0, 50, 0))
+        
+        # Setup Panel :    [Target: ] [______________________] [START BUTTON]
+        self.setupPanel = JPanel(FlowLayout(FlowLayout.LEADING, 10, 10))
+        self.setupPanel.add(JLabel("Target:", SwingConstants.LEFT), BorderLayout.LINE_START)
+        self.hostField = JTextField('', 50)
+        self.setupPanel.add(self.hostField)
+        self.toggleButton = JButton('Start scanning', actionPerformed=self.getScanIssues)
+        self.setupPanel.add(self.toggleButton)
+        # Status bar
+        self.scanStatusPanel = JPanel(FlowLayout(FlowLayout.LEADING, 10, 10))
+        self.scanStatusPanel.add(JLabel("Status: ", SwingConstants.LEFT))
+        self.scanStatusLabel = JLabel("Ready to scan", SwingConstants.LEFT)
+        self.scanStatusPanel.add(self.scanStatusLabel)
+        # Add setup panel and status panel to top panel
+        self._topPanel.add(self.setupPanel, BorderLayout.PAGE_START)
+        self._topPanel.add(self.scanStatusPanel, BorderLayout.LINE_START)
+        
+        self._internalScanningSplitpane.setLeftComponent(self._topPanel)
+        self._internalScanningSplitpane.setRightComponent(scanScrollPane)
+        self._scanningSplitpane.setLeftComponent(self._internalScanningSplitpane)
+        
         
         # tabs with request/response viewers
         scannerTabs = JTabbedPane()
         self._requestViewer2 = callbacks.createMessageEditor(self, False)
         self._responseViewer2 = callbacks.createMessageEditor(self, False)
         self._scanMsgViewer = JTextPane()
+        self._scanMsgViewer.setContentType("text/html")
         self._scanMsgViewer.setEditable(False)
-        scannerTabs.addTab("Advisory", self._scanMsgViewer)
+        self._scanMsgViewerScrollPane = JScrollPane(self._scanMsgViewer)
+        scannerTabs.addTab("Advisory", self._scanMsgViewerScrollPane)
         scannerTabs.addTab("Request", self._requestViewer2.getComponent())
         scannerTabs.addTab("Response", self._responseViewer2.getComponent())
         self._scanningSplitpane.setRightComponent(scannerTabs)
         self._mainTab.addTab("Scanner Logs", self._scanningSplitpane)
-        
         #################################################################
-  
-
 
         # add the custom tab to Burp's UI
         callbacks.addSuiteTab(self)  
@@ -115,6 +152,83 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         # register ourselves as a Proxy listener
         callbacks.registerProxyListener(self) 
         return
+    
+    #
+    # logged existing scan issues
+    #
+    def getScanIssues(self, event):
+        host = self.hostField.text
+        if(len(host) == 0):
+            return
+        if host.find("://") == -1:
+            host = "https://" + host 
+        
+        try:
+            scannedIssues = self._callbacks.getScanIssues(host)
+            self._stdout.println("Size of scanned issues on this url: " + str(len(scannedIssues)))
+
+            # Include to scope
+            self._callbacks.includeInScope(URL(host))
+            self._stdout.println("Included in scope: " + host)
+            
+            # Store Scan issue
+            
+            for issue in scannedIssues:
+                if issue.getIssueName() not in self._repeatedIssue:
+                    row = self._scanLog.size()
+                    requestResponse = issue.getHttpMessages()
+                    serverity = issue.getSeverity()
+                    issueName = issue.getIssueName()
+                    url = issue.getUrl()
+                    confidence = issue.getConfidence()
+                    scanMsg = issue.getIssueDetail()
+                    
+                    if len(requestResponse) > 0:
+                        scan = ScanEntry(requestResponse[0], serverity, issueName, url, confidence, scanMsg)
+                    else:
+                        scan = ScanEntry(requestResponse, serverity, issueName, url, confidence, scanMsg)
+
+                    self._scanModel.setValueAt(scan, row, row)
+                    self._repeatedIssue.append(issue.getIssueName())
+            #
+            # register ourselves as IscannerListener
+            self._callbacks.registerScannerListener(self)   
+        
+        except BaseException as e:
+            print(e)
+            return
+
+    
+    # implement IscannerListener
+    def newScanIssue(self, issue):
+        if issue.getIssueName() not in self._repeatedIssue:
+            row = self._scanLog.size()
+            requestResponse = issue.getHttpMessages()
+            serverity = issue.getSeverity()
+            issueName = issue.getIssueName()
+            url = issue.getUrl()
+            confidence = issue.getConfidence()
+            scanMsg = issue.getIssueDetail()
+            
+            if len(requestResponse) > 0:
+                scan = ScanEntry(requestResponse[0], serverity, issueName, url, confidence, scanMsg)
+            else:
+                scan = ScanEntry(requestResponse, serverity, issueName, url, confidence, scanMsg)
+
+            self._scanModel.setValueAt(scan, row, row)
+            self._repeatedIssue.append(issue.getIssueName())
+    
+    #
+    # implement IMessageEditorController
+    #    # this allows our request/response viewers to obtain details about the messages being displayed
+    def getHttpService(self):
+        return self._currentlyDisplayedItem.getHttpService()
+
+    def getRequest(self):
+        return self._currentlyDisplayedItem.getRequest()
+
+    def getResponse(self):
+        return self._currentlyDisplayedItem.getResponse()
         
     #
     # implement ITab
@@ -259,25 +373,8 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         
         if(toLog):
             log = LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl(), logMsg)
-            self._log.add(log)
-            self._stdout.println(logMsg)
-            self._data_model.fireTableRowsInserted(row, row)
-            
-    #
-    # implement IMessageEditorController
-    #    # this allows our request/response viewers to obtain details about the messages being displayed
-
-    def getHttpService(self):
-        return self._currentlyDisplayedItem.getHttpService()
-
-    def getRequest(self):
-        return self._currentlyDisplayedItem.getRequest()
-
-    def getResponse(self):
-        return self._currentlyDisplayedItem.getResponse()
-
-      
-    
+            self._logModel.setValueAt(log, row, row)
+            self._stdout.println(log._logMsg)
     #
 	# @params IParameter Type
 	#
@@ -292,10 +389,13 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
 		}
 		return plist[type]
 
-class dataModel(AbstractTableModel):
+class logModel(AbstractTableModel):
+    def __init__(self, extender):
+        self._extender = extender
+
     def getRowCount(self):
         try:
-            return self._log.size()
+            return self._extender._log.size()
         except:
             return 0
 
@@ -310,59 +410,30 @@ class dataModel(AbstractTableModel):
         return ""
 
     def getValueAt(self, rowIndex, columnIndex):
-        logEntry = self._log.get(rowIndex)
+        logEntry= self._extender._log.get(rowIndex)
         if columnIndex == 0:
-            return self._callbacks.getToolName(logEntry._tool)
+            return self._extender._callbacks.getToolName(logEntry._tool)
         if columnIndex == 1:
-            return logEntry._url.toString()
-        return ""          
+            return  logEntry._url.toString()
+        return ""
         
-        
-#
-# extend JTable to handle cell selection
-#   
-class Table(JTable):
+    def setValueAt(self, log, rowIndex, columnIndex):
+        self._extender._log.add(log)
+        self.fireTableRowsInserted(rowIndex, columnIndex)
+ 
+class scanModel(AbstractTableModel):
     def __init__(self, extender):
         self._extender = extender
-        self.setModel(extender)
-    
-    def changeSelection(self, row, col, toggle, extend):
-    
-        # show the log entry for the selected row
-        logEntry = self._extender._log.get(row)    
-        self._extender._logMsgViewer.setText(logEntry._logMsg)
-        self._extender._requestViewer.setMessage(logEntry._requestResponse.getRequest(), True)
-        self._extender._responseViewer.setMessage(logEntry._requestResponse.getResponse(), False)
-        JTable.changeSelection(self, row, col, toggle, extend)
 
-
-
-   
-class ScanTable(JTable):
-    def __init__(self, extender):
-        self._extender = extender
-        #self.setModel(extender)
-        
-    def changeSelection2(self, row, col, toggle, extend):
-    
-        # show the log entry for the selected row
-        scanEntry = self._extender._scanLog.get(row)
-        self._extender._scanMsgViewer.setText(scanEntry._scanMsg)
-        self._extender._requestViewer2.setMessage(scanEntry._requestResponse.getRequest(), True)
-        self._extender._responseViewer2.setMessage(scanEntry._requestResponse.getResponse(), False)
-        JTable.changeSelection2(self, row, col, toggle, extend)
-    #
-    # extend AbstractTableModelfor scanner logs
-    #        
     def getRowCount(self):
         try:
-            return self._scanLog.size()
+            return self._extender._scanLog.size()
         except:
             return 0
-            
+
     def getColumnCount(self):
         return 5
-        
+
     def getColumnName(self, columnIndex):
         if columnIndex == 0:
             return "ID"
@@ -374,22 +445,57 @@ class ScanTable(JTable):
             return "URL"
         if columnIndex == 4:
             return "Confidence"
-               
-    def getValueAt(self, rowIndex, columnIndex):
-        scanEntry = self._scanLog.get(rowIndex)
-        if columnIndex == 0:
-            return rowIndex
-        if columnIndex == 1:
-            return scanEntry._severity
-        if columnIndex == 2:
-            return scanEntry._issueName            
-        if columnIndex == 3:
-            return scanEntry._url.toString()
-        if columnIndex == 4:
-            return scanEntry._confidence   
-        return ""        
 
+        return ""
+
+    def getValueAt(self, rowIndex, columnIndex):
+        scanEntry= self._extender._scanLog.get(rowIndex)
+        if columnIndex == 0:
+            return rowIndex +1
+        if columnIndex == 1:
+            return  scanEntry._severity
+        if columnIndex == 2:
+            return  scanEntry._issueName
+        if columnIndex == 3:
+            return  scanEntry._url.toString()
+        if columnIndex == 4:
+            return  scanEntry._confidence
+        return ""
         
+    def setValueAt(self, scan, rowIndex, columnIndex):
+        self._extender._scanLog.add(scan)
+        self.fireTableRowsInserted(rowIndex, columnIndex)
+        
+#
+# extend JTable to handle cell selection
+#   
+class Table(JTable):
+    def __init__(self, extender1, extender2):
+        self._extender = extender1
+        self.setModel(extender2)
+    
+    def changeSelection(self, row, col, toggle, extend):
+        # show the log entry for the selected row
+        logEntry = self._extender._log.get(row)    
+        self._extender._logMsgViewer.setText(logEntry._logMsg)
+        self._extender._requestViewer.setMessage(logEntry._requestResponse.getRequest(), True)
+        self._extender._responseViewer.setMessage(logEntry._requestResponse.getResponse(), False)
+        JTable.changeSelection(self, row, col, toggle, extend)
+
+class ScanTable(JTable):
+    def __init__(self, extender1, extender2):
+        self._extender = extender1
+        self.setModel(extender2)
+        
+    def changeSelection(self, row, col, toggle, extend):
+    
+        # show the scan entry for the selected scan
+        scanEntry = self._extender._scanLog.get(row)
+        self._extender._scanMsgViewer.setText(scanEntry._scanMsg)
+        self._extender._requestViewer2.setMessage(scanEntry._requestResponse.getRequest(), True)
+        self._extender._responseViewer2.setMessage(scanEntry._requestResponse.getResponse(), False)
+        JTable.changeSelection2(self, row, col, toggle, extend)
+    
 #
 # class to hold details of each log entry
 #
@@ -409,6 +515,6 @@ class ScanEntry:
         self._severity = severity
         self._issueName = issueName
         self._url = url
-        sef._confidence = confidence
+        self._confidence = confidence
         self._scanMsg = scanMsg
                
