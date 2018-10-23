@@ -147,7 +147,14 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
 
         ############## Tab for Report Generation ############## 
         self._reportGenSplitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
-
+        
+        # Todo report output format
+        
+        # Todo output directory
+        
+        # Todo append date to report filenames
+        
+        # generate report
         self._mainTab.addTab("Report Generation", self._reportGenSplitpane)
         #################################################################
         # add the custom tab to Burp's UI
