@@ -10,27 +10,33 @@ try:
     from burp import ICookie
     from burp import IScanIssue
     from burp import IScannerListener
-    from java.awt import Component;
-    from java.io import PrintWriter;
-    from java.util import ArrayList;
-    from java.util import List;
-    from javax.swing import JScrollPane;
-    from javax.swing import JSplitPane;
-    from javax.swing import JTabbedPane;
+    from java.awt import Component
+    from java.awt import GridLayout
+    from java.io import PrintWriter
+    from java.util import ArrayList
+    from java.util import List
+    from javax.swing import JScrollPane
+    from javax.swing import JSplitPane
+    from javax.swing import JTabbedPane
     from javax.swing import JTable;
-    from javax.swing import SwingUtilities;
-    from javax.swing.table import AbstractTableModel;
-    from javax.swing import JTextPane;
+    from javax.swing import SwingUtilities
+    from javax.swing.table import AbstractTableModel
+    from javax.swing import JTextPane
     from javax.swing import JPanel
     from javax.swing import JLabel
     from javax.swing import JTextField
     from javax.swing import JButton
-    from javax.swing import JButton
+    from javax.swing import ButtonGroup
+    from javax.swing import JRadioButton
+    from javax.swing import JCheckBox
+    from javax.swing import JFileChooser
     from javax.swing import SwingConstants
     from javax.swing.border import EmptyBorder
+    from java.io import File
     from java.awt import (BorderLayout,FlowLayout)
     from threading import Lock
     from java.net import URL
+    from java.lang import System as System
     import base64
 except ImportError as e:
     print e
@@ -58,6 +64,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._scanLog = ArrayList()
         self._lock = Lock()
         self._repeatedIssue = []
+        self._destDir = File(System.getProperty("java.io.tmpdir"))
         
         # Custom logging flags
         self._secHeaderFlag = False
@@ -145,24 +152,52 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._mainTab.addTab("Scanner Logs", self._scanningSplitpane)
         #################################################################
 
-        ############## Tab for Report Generation ############## 
+
+
+        ################### Tab for Report Generation ################### 
         self._reportGenSplitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
         
-        # Todo report output format
+        self._reportGenComponent = JPanel()
+        self._innerPanel = JPanel(GridLayout(2,2,2,0))
         
         # Todo output directory
+        self._innerPanel.add(JLabel("Report Output Root Directory:" , SwingConstants.RIGHT))
+		
+        self._destDirChooser = JFileChooser()
+        self._destDirChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY)
+        dirPanel = JPanel(FlowLayout(FlowLayout.LEFT))
+        destDirButton = JButton("Select folder ...", actionPerformed=self.getDirectoryPath)
+        self._destDirLabel = JLabel(self._destDir.getAbsolutePath())
+        dirPanel.add(destDirButton)
+        dirPanel.add(self._destDirLabel)
+        self._innerPanel.add(dirPanel)
         
-        # Todo append date to report filenames
         
         # generate report
-        self._mainTab.addTab("Report Generation", self._reportGenSplitpane)
+        generateButton = JButton("Generate Report" , actionPerformed=self.generateReport)
+        self._innerPanel.add(generateButton);
+        self._statusLabel = JLabel()
+        self._innerPanel.add(self._statusLabel)
+
+        self._reportGenComponent.add(self._innerPanel)
+        self._mainTab.addTab("Report Generation", self._reportGenComponent)
         #################################################################
+        
         # add the custom tab to Burp's UI
         callbacks.addSuiteTab(self)  
         callbacks.customizeUiComponent(self._mainTab)
 
         # register ourselves as a Proxy listener
         callbacks.registerProxyListener(self) 
+        return
+    
+    def getDirectoryPath(self, event):
+        res = self._destDirChooser.showOpenDialog(None)
+        if res == JFileChooser.APPROVE_OPTION:
+                self._destDir = self._destDirChooser.getSelectedFile()
+                self._destDirLabel.setText(self._destDir.getAbsolutePath())
+    
+    def generateReport(self, event):
         return
     
     #
