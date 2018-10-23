@@ -145,6 +145,11 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._mainTab.addTab("Scanner Logs", self._scanningSplitpane)
         #################################################################
 
+        ############## Tab for Report Generation ############## 
+        self._reportGenSplitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
+
+        self._mainTab.addTab("Report Generation", self._reportGenSplitpane)
+        #################################################################
         # add the custom tab to Burp's UI
         callbacks.addSuiteTab(self)  
         callbacks.customizeUiComponent(self._mainTab)
@@ -157,20 +162,21 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
     # logged existing scan issues
     #
     def getScanIssues(self, event):
-        host = self.hostField.text
-        if(len(host) == 0):
+        url = self.hostField.text
+        if(len(url) == 0):
             return
-        if host.find("://") == -1:
-            host = "https://" + host 
-        
+        if url.find("://") == -1:
+            host = "https://" + url
+            host2 = "http://" + url
         try:
             scannedIssues = self._callbacks.getScanIssues(host)
             self._stdout.println("Size of scanned issues on this url: " + str(len(scannedIssues)))
 
             # Include to scope
             self._callbacks.includeInScope(URL(host))
+            self._callbacks.includeInScope(URL(host2))
             self._stdout.println("Included in scope: " + host)
-            
+            self._stdout.println("Included in scope: " + host2)
             # Store Scan issue
             
             for issue in scannedIssues:
