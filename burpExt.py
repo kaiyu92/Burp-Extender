@@ -1,5 +1,6 @@
 # Development Branch
 try:
+    import xlsxwriter
     from burp import IBurpExtender
     from burp import ITab
     from burp import IProxyListener
@@ -198,6 +199,37 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 self._destDirLabel.setText(self._destDir.getAbsolutePath())
     
     def generateReport(self, event):
+        # Create a workbook and add a worksheet.
+        file = str(self._destDir) + '/Burp-Logs.xlsx'
+        self._stdout.println("Saving the file at " + str(file))
+        workbook = xlsxwriter.Workbook(str(file))
+        httpTrafficSheet = workbook.add_worksheet('HTTP Traffic')
+        passiveScanSheet = workbook.add_worksheet('Passive Scan')
+
+        # Start from the first cell. Rows and columns are zero indexed.
+        row = 0
+        index = 1
+        
+        for log in self._log:
+            httpTrafficSheet.write(row, 0 , index)
+            httpTrafficSheet.write(row, 1 , str(log._url))
+            httpTrafficSheet.write(row, 2 , log._logMsg)
+            index += 1
+            row += 1 
+            
+        row = 0 
+        index = 1        
+        for scan in self._scanLog:
+            passiveScanSheet.write(row, 0, index)
+            passiveScanSheet.write(row, 1, str(self._url))
+            passiveScanSheet.write(row, 2, self._severity)
+            passiveScanSheet.write(row, 3, self._issueName)
+            passiveScanSheet.write(row, 4, self._confidence)
+    
+            index += 1
+            row += 1 
+        workbook.close()
+        
         return
     
     #
