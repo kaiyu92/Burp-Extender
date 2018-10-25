@@ -1,6 +1,7 @@
 # Development Branch
 try:
     import xlsxwriter
+    from shutil import copyfile
     from burp import IBurpExtender
     from burp import ITab
     from burp import IProxyListener
@@ -41,9 +42,7 @@ try:
     import base64
 except ImportError as e:
     print e
-    print "Failed to load dependencies. This issue maybe caused by using an unstable Jython version."
-#import re
-
+    #print "Failed to load dependencies. This issue maybe caused by using an unstable Jython version."
 
 class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController, IScannerListener):
     
@@ -200,31 +199,61 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
     
     def generateReport(self, event):
         # Create a workbook and add a worksheet.
-        file = str(self._destDir) + '/Burp-Logs.xlsx'
+        baseTemplate = 'C:\\Users\\winston\\Desktop\\baseTemplate.xlsx'
+        file = str(self._destDir) + '\Burp-Logs.xlsx'
         self._stdout.println("Saving the file at " + str(file))
+        copyfile(baseTemplate, file)
         workbook = xlsxwriter.Workbook(str(file))
+        text_format  = workbook.add_format({'text_wrap': True})
+        header_format = workbook.add_format({'bold' : True, 'underline' : True, 'bg_color' : 'red' })
+                    
         httpTrafficSheet = workbook.add_worksheet('HTTP Traffic')
         passiveScanSheet = workbook.add_worksheet('Passive Scan')
-
-        # Start from the first cell. Rows and columns are zero indexed.
-        row = 0
+            
+        
+        # create the sheet headers
+        httpTrafficSheet.write(0, 0 , "ID", header_format)
+        httpTrafficSheet.write(0, 1 , "URL", header_format)
+        httpTrafficSheet.write(0, 2 , "Logged Message", header_format)
+        httpTrafficSheet.set_column(1,1,80)
+        httpTrafficSheet.set_column(2,2,50)
+        
+        passiveScanSheet.write(0, 0 , "ID", header_format)
+        passiveScanSheet.write(0, 1 , "URL", header_format)
+        passiveScanSheet.write(0, 2 , "Serverity", header_format)
+        passiveScanSheet.write(0, 3 , "Issues", header_format)
+        passiveScanSheet.write(0, 4 , "Confident Level", header_format)  
+        passiveScanSheet.set_column(1,1,80)
+        passiveScanSheet.set_column(2,4,20)
+        passiveScanSheet.set_column(3,3,40)
+        
+        # Write HTTP Traffic logs on sheet 1
+        # Start from the second cell. Rows and columns are zero indexed.
+        row = 1
         index = 1
         
         for log in self._log:
+            height = log._logMsg.count("[+]")
+            height = height * 20
+            httpTrafficSheet.set_row(row, height)
+            
             httpTrafficSheet.write(row, 0 , index)
             httpTrafficSheet.write(row, 1 , str(log._url))
-            httpTrafficSheet.write(row, 2 , log._logMsg)
+            httpTrafficSheet.write(row, 2 , log._logMsg, text_format)
+       
             index += 1
             row += 1 
-            
-        row = 0 
+        
+        # Write scanner logs on sheet 2
+        # Start from the second cell. Rows and columns are zero indexed.           
+        row = 1 
         index = 1        
         for scan in self._scanLog:
             passiveScanSheet.write(row, 0, index)
-            passiveScanSheet.write(row, 1, str(self._url))
-            passiveScanSheet.write(row, 2, self._severity)
-            passiveScanSheet.write(row, 3, self._issueName)
-            passiveScanSheet.write(row, 4, self._confidence)
+            passiveScanSheet.write(row, 1, str(scan._url))
+            passiveScanSheet.write(row, 2, scan._severity)
+            passiveScanSheet.write(row, 3, scan._issueName)
+            passiveScanSheet.write(row, 4, scan._confidence)
     
             index += 1
             row += 1 
