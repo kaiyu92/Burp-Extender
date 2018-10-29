@@ -1,7 +1,6 @@
 # Development Branch
 try:
     import xlsxwriter
-    from shutil import copyfile
     from burp import IBurpExtender
     from burp import ITab
     from burp import IProxyListener
@@ -40,6 +39,14 @@ try:
     from java.net import URL
     from java.lang import System as System
     import base64
+    from bs4 import BeautifulSoup
+    '''
+    import openpyxl
+    import sys
+    sys.path.append("C:\Users\winston\Desktop\burpExt\lib\poi-4.0.0.jar")
+    from org.apache.poi.hssf.usermodel import *
+    '''
+    
 except ImportError as e:
     print e
     #print "Failed to load dependencies. This issue maybe caused by using an unstable Jython version."
@@ -174,7 +181,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         
         
         # generate report
-        generateButton = JButton("Generate Report" , actionPerformed=self.generateReport)
+        generateButton = JButton("Generate Report" , actionPerformed=self.generateReport2)
         self._innerPanel.add(generateButton);
         self._statusLabel = JLabel()
         self._innerPanel.add(self._statusLabel)
@@ -199,10 +206,8 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
     
     def generateReport(self, event):
         # Create a workbook and add a worksheet.
-        baseTemplate = 'C:\\Users\\winston\\Desktop\\baseTemplate.xlsx'
-        file = str(self._destDir) + '\Burp-Logs.xlsx'
+        file = str(self._destDir) + '/Burp-Logs.xlsx'
         self._stdout.println("Saving the file at " + str(file))
-        copyfile(baseTemplate, file)
         workbook = xlsxwriter.Workbook(str(file))
         text_format  = workbook.add_format({'text_wrap': True})
         header_format = workbook.add_format({'bold' : True, 'underline' : True, 'bg_color' : 'red' })
@@ -210,6 +215,8 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         httpTrafficSheet = workbook.add_worksheet('HTTP Traffic')
         passiveScanSheet = workbook.add_worksheet('Passive Scan')
             
+        baseTemplate = 'C:\\Users\\winston\\Desktop\\baseTemplate.xlsx'
+
         
         # create the sheet headers
         httpTrafficSheet.write(0, 0 , "ID", header_format)
@@ -240,6 +247,8 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             httpTrafficSheet.write(row, 0 , index)
             httpTrafficSheet.write(row, 1 , str(log._url))
             httpTrafficSheet.write(row, 2 , log._logMsg, text_format)
+            
+
        
             index += 1
             row += 1 
@@ -261,6 +270,33 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         
         return
     
+    
+    def generateReport2(self, event):
+        # load the file
+        with open("C:\\Users\\winston\\Desktop\\baseTemplate.html") as inf:
+            txt = inf.read()
+            soup = BeautifulSoup(txt)
+
+        original_string = soup.find("td", id="row3.e")
+        new_text = unicode(original_string).replace( '<br/>' , 'THIS IS GONNA GET REPLACED' )
+        original_string.replace_with(new_text)
+        
+        '''
+        new_text = unicode(original_string).replace( '<br/>' , 'THIS IS GONNA GET REPLACED' )
+        print original_string
+        print "\n"
+        print new_text
+        print "\n"
+        '''
+        test_string = soup.find("td", id="row3.e")
+        print test_string
+        
+        
+        # save the file again
+        with open("C:\\Users\\winston\\Desktop\\baseTemplate.html", "w") as outf:
+            outf.write(str(soup))
+        
+        self._stdout.println("Updated the file!")
     #
     # logged existing scan issues
     #
