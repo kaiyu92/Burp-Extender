@@ -1,6 +1,7 @@
 # Development Branch
 try:
     import xlsxwriter
+    import shutil
     from burp import IBurpExtender
     from burp import ITab
     from burp import IProxyListener
@@ -73,9 +74,23 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._repeatedIssue = []
         self._destDir = File(System.getProperty("java.io.tmpdir"))
         
+        # Scan Classification list
+        self._xssIssues = ["JavaScript injection (DOM-based)" , "JavaScript injection (reflected DOM-based)" , "JavaScript injection (stored DOM-based)" , "Cross-site request foregery", "Cross-site scripting (DOM-based)" , "Cross-site scripting (reflected DOM-based)" , "Cross-site scripting (reflected)" , "Cross-site scripting (stored DOM-based)" , "Cross-site scripting (stored)" , "Server-side JavaScript code injection" ]
+        
+        self._sqlIssues = ["SQL injection" , "SQL injection (second order)" , "Client-side SQL injection (DOM-based)" , "Client-side SQL injection (reflected DOM-based)" , "Client-side SQL injection (stored DOM-based)" ]
+        self._ldapIssues = ["LDAP injection"]
+        self._ssiIssues = ["SSI injection"]
+        self._imapSmtpIssues = ["SMTP header injection"]
+        self._osCommandIssues = ["OS command injection"]
+        self._sourceCodeIssues = ["Source code disclosure"]
+        self._webDirIssues = ["Directory Listing & File path traversal"]
+        self._xmlFlashHTMLIssues = ["XML injection" , "XPath injection" , "HTTP response header injection" ]
+        self._cacheableIssues = ["Cacheable HTTPS response"]
+        self._cookieIssues = ["Cookie manipulation (DOM-based)" , "Cookie manipulation (reflected DOM-based)" , "Cookie manipulation (stored DOM-based)" , "Cookie scoped to parent domain" , "Cookie without HttpOnly flag set" ]
+        
         # Custom logging flags
         self._secHeaderFlag = False
-        self._cookieFlag = False
+        self._cookieOverallFlag = False
         self._httpRequestFlag = False
         self._basicAuthenticationFlag = False
         self._serverDetailFlag = False 
@@ -102,9 +117,12 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._responseViewer = callbacks.createMessageEditor(self, False)
         self._logMsgViewer = JTextPane()
         self._logMsgViewer.setEditable(False)
+        self._evidenceViewer = JTextPane()
+        self._evidenceViewer.setEditable(False)
         trafficTabs.addTab("Request", self._requestViewer.getComponent())
         trafficTabs.addTab("Response", self._responseViewer.getComponent())
         trafficTabs.addTab("Logged Flags", self._logMsgViewer)
+        trafficTabs.addTab("Evidence", self._evidenceViewer)
         self._trafficSplitpane.setRightComponent(trafficTabs)
         self._mainTab.addTab("HTTP Traffic Logs", self._trafficSplitpane)
         
@@ -181,13 +199,14 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         
         
         # generate report
-        generateButton = JButton("Generate Report" , actionPerformed=self.generateReport2)
+        generateButton = JButton("Generate Report" , actionPerformed=self.generateReport)
         self._innerPanel.add(generateButton);
         self._statusLabel = JLabel()
         self._innerPanel.add(self._statusLabel)
 
         self._reportGenComponent.add(self._innerPanel)
         self._mainTab.addTab("Report Generation", self._reportGenComponent)
+      
         #################################################################
         
         # add the custom tab to Burp's UI
@@ -204,6 +223,9 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 self._destDir = self._destDirChooser.getSelectedFile()
                 self._destDirLabel.setText(self._destDir.getAbsolutePath())
     
+    #
+    # Generate report into HTML checklist and logs to excel table
+    #
     def generateReport(self, event):
         # Create a workbook and add a worksheet.
         file = str(self._destDir) + '/Burp-Logs.xlsx'
@@ -214,16 +236,25 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                     
         httpTrafficSheet = workbook.add_worksheet('HTTP Traffic')
         passiveScanSheet = workbook.add_worksheet('Passive Scan')
-            
-        baseTemplate = 'C:\\Users\\winston\\Desktop\\baseTemplate.xlsx'
-
+        
+        # Create the checklist
+        baseTemplate = 'C:\\Users\\winston\\Desktop\\baseTemplate.html'
+        newHTMLFile =  'C:\\Users\\winston\\Desktop\\Burp-Logs.html'        # DEBUG
+        # newHTMLFile = str(self._destDir) + '/Burp-Logs.html'              # Actual Implementation
+        
+        shutil.copyfile(baseTemplate, newHTMLFile)  
+        # load the checklist file
+        with open(newHTMLFile) as inf:
+            txt = inf.read()
+            soup = BeautifulSoup(txt)
         
         # create the sheet headers
         httpTrafficSheet.write(0, 0 , "ID", header_format)
         httpTrafficSheet.write(0, 1 , "URL", header_format)
         httpTrafficSheet.write(0, 2 , "Logged Message", header_format)
+        httpTrafficSheet.write(0, 3 , "Evidence", header_format)
         httpTrafficSheet.set_column(1,1,80)
-        httpTrafficSheet.set_column(2,2,50)
+        httpTrafficSheet.set_column(2,3,50)
         
         passiveScanSheet.write(0, 0 , "ID", header_format)
         passiveScanSheet.write(0, 1 , "URL", header_format)
@@ -247,12 +278,47 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             httpTrafficSheet.write(row, 0 , index)
             httpTrafficSheet.write(row, 1 , str(log._url))
             httpTrafficSheet.write(row, 2 , log._logMsg, text_format)
-            
-
-       
+            httpTrafficSheet.write(row, 3 , log._evidence, text_format)
             index += 1
             row += 1 
-        
+            
+            #
+            # Write on checklist
+            #
+            
+            # unencryptedChannelFlag (17)
+            if log._unencryptedChannelFlag:
+                original_string = soup.find("td", id="17e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="17f")
+                original_string.string.replace_with(log._evidence)
+            
+            # serverInfoFlag (38)          
+            if log._serverInfoFlag:
+                original_string = soup.find("td", id="38e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="38f")
+                original_string.string.replace_with(log._evidence)
+                
+            # base64Flag (46)          
+            if log._base64Flag:
+                original_string = soup.find("td", id="46e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="46f")
+                original_string.string.replace_with(log._evidence)                
+            # xcontentFlag (50)          
+            if log._xcontentFlag:
+                original_string = soup.find("td", id="50e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="50f")
+                original_string.string.replace_with(log._evidence)                
+            # cookieFlag (84)          
+            if log._cookieFlag:
+                original_string = soup.find("td", id="84e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="84f")
+                original_string.string.replace_with(log._evidence)
+                
         # Write scanner logs on sheet 2
         # Start from the second cell. Rows and columns are zero indexed.           
         row = 1 
@@ -263,40 +329,120 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             passiveScanSheet.write(row, 2, scan._severity)
             passiveScanSheet.write(row, 3, scan._issueName)
             passiveScanSheet.write(row, 4, scan._confidence)
-    
             index += 1
             row += 1 
+            
+            if scan._classification == "Web Directory Listing":
+                original_string = soup.find("td", id="41e")
+                original_string.string.replace_with("Automated Scan detected Web Directory Issues")
+                original_string = soup.find("td", id="41f")
+                original_string = soup.find("td", id="41f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+                            
+            elif scan._classification == "XSS":
+                original_string = soup.find("td", id="54e")
+                original_string.string.replace_with("Automated Scan detected XSS Issues")
+                original_string = soup.find("td", id="54f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+                            
+            elif scan._classification == "SQL":   
+                original_string = soup.find("td", id="57e")
+                original_string.string.replace_with("Automated Scan detected SQL Issues")
+                original_string = soup.find("td", id="57f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+                            
+            elif scan._classification == "LDAP":     
+                original_string = soup.find("td", id="60e")
+                original_string.string.replace_with("Automated Scan detected LDAP Issues")
+                original_string = soup.find("td", id="60f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+                        
+            elif scan._classification == "XML/JSON/Flash/XPath/HTML/XFS Injection":
+                original_string = soup.find("td", id="63e")
+                original_string.string.replace_with("Automated Scan detected XML/JSON/Flash/XPath/HTML/XFS Injection Issues")
+                original_string = soup.find("td", id="63f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+                            
+            elif scan._classification == "SSI":
+                original_string = soup.find("td", id="67e")
+                original_string.string.replace_with("Automated Scan detected SSI Issues")
+                original_string = soup.find("td", id="67f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+                            
+            elif scan._classification == "IMAP/SMTP":
+                original_string = soup.find("td", id="70e")
+                original_string.string.replace_with("Automated Scan detected IMAP/SMTP Issues")
+                original_string = soup.find("td", id="70f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+                            
+            elif scan._classification == "OS Command":
+                original_string = soup.find("td", id="73e")
+                original_string.string.replace_with("Automated Scan detected OS Command Issues")
+                original_string = soup.find("td", id="74f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+                            
+            elif scan._classification == "Sensitive Source Code":
+                original_string = soup.find("td", id="103e")
+                original_string.string.replace_with("Automated Scan detected Sensitive Source Code Issues")
+                original_string = soup.find("td", id="103f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+                        
+            elif scan._classification == "Cacheable HTTPS response":
+                original_string = soup.find("td", id="105e")
+                original_string.string.replace_with("Automated Scan detected Cacheable HTTPS response Issues")
+                original_string = soup.find("td", id="105f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+            
         workbook.close()
-        
-        return
-    
-    
-    def generateReport2(self, event):
-        # load the file
-        with open("C:\\Users\\winston\\Desktop\\baseTemplate.html") as inf:
-            txt = inf.read()
-            soup = BeautifulSoup(txt)
-
-        original_string = soup.find("td", id="row3.e")
-        new_text = unicode(original_string).replace( '<br/>' , 'THIS IS GONNA GET REPLACED' )
-        original_string.replace_with(new_text)
-        
-        '''
-        new_text = unicode(original_string).replace( '<br/>' , 'THIS IS GONNA GET REPLACED' )
-        print original_string
-        print "\n"
-        print new_text
-        print "\n"
-        '''
-        test_string = soup.find("td", id="row3.e")
-        print test_string
         
         
         # save the file again
-        with open("C:\\Users\\winston\\Desktop\\baseTemplate.html", "w") as outf:
+        with open(newHTMLFile, "w") as outf:
             outf.write(str(soup))
+            self._stdout.println("Updated the file!")
         
-        self._stdout.println("Updated the file!")
+        return
+    
     #
     # logged existing scan issues
     #
@@ -328,10 +474,33 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                     confidence = issue.getConfidence()
                     scanMsg = issue.getIssueDetail()
                     
-                    if len(requestResponse) > 0:
-                        scan = ScanEntry(requestResponse[0], serverity, issueName, url, confidence, scanMsg)
+                    # Classification of Issues
+                    if issueName in self._xssIssues:
+                        classification = "XSS"
+                    elif issueName in self._sqlIssues:
+                        classification = "SQL"
+                    elif issueName in self._ldapIssues:
+                        classification = "LDAP"
+                    elif issueName in self._ssiIssues:
+                        classification = "SSI"
+                    elif issueName in self._imapSmtpIssues:
+                        classification = "IMAP/SMTP"
+                    elif issueName in self._osCommandIssues:
+                        classification = "OS Command"
+                    elif issueName in self._sourceCodeIssues:
+                        classification = "Sensitive Source Code"
+                    elif issueName in self._webDirIssues:
+                        classification = "Web Directory Listing"
+                    elif issueName in self._xmlFlashHTMLIssues:
+                        classification = "XML/JSON/Flash/XPath/HTML/XFS Injection"
+                    elif issueName in self._cacheableIssues:
+                        classification = "Cacheable HTTPS response"
                     else:
-                        scan = ScanEntry(requestResponse, serverity, issueName, url, confidence, scanMsg)
+                        classification = "-"
+                    if len(requestResponse) == 1 :
+                        scan = ScanEntry(requestResponse[0], serverity, issueName, url, confidence, scanMsg, classification)
+                    else:
+                        scan = ScanEntry(None, serverity, issueName, url, confidence, scanMsg, classification)
 
                     self._scanModel.setValueAt(scan, row, row)
                     self._repeatedIssue.append(issue.getIssueName())
@@ -355,10 +524,34 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             confidence = issue.getConfidence()
             scanMsg = issue.getIssueDetail()
             
-            if len(requestResponse) > 0:
-                scan = ScanEntry(requestResponse[0], serverity, issueName, url, confidence, scanMsg)
+            # Classification of Issues
+            if issueName in self._xssIssues:
+                classification = "XSS"
+            elif issueName in self._sqlIssues:
+                classification = "SQL"
+            elif issueName in self._ldapIssues:
+                classification = "LDAP"
+            elif issueName in self._ssiIssues:
+                classification = "SSI"
+            elif issueName in self._imapSmtpIssues:
+                classification = "IMAP/SMTP"
+            elif issueName in self._osCommandIssues:
+                classification = "OS Command"
+            elif issueName in self._sourceCodeIssues:
+                classification = "Sensitive Source Code"
+            elif issueName in self._webDirIssues:
+                classification = "Web Directory Listing"
+            elif issueName in self._xmlFlashHTMLIssues:
+                classification = "XML/JSON/Flash/XPath/HTML/XFS Injection"
+            elif issueName in self._cacheableIssues:
+                classification = "Cacheable HTTPS response"
             else:
-                scan = ScanEntry(requestResponse, serverity, issueName, url, confidence, scanMsg)
+                classification = "-"
+
+            if len(requestResponse) == 1 :
+                scan = ScanEntry(requestResponse[0], serverity, issueName, url, confidence, scanMsg, classification)
+            else:
+                scan = ScanEntry(None, serverity, issueName, url, confidence, scanMsg, classification)
 
             self._scanModel.setValueAt(scan, row, row)
             self._repeatedIssue.append(issue.getIssueName())
@@ -398,41 +591,82 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             self._lock.acquire()
             self.logMessage(message)    
             self._lock.release()
+    
+    def resetLogMsg(self):
+        self._row = self._log.size()
+        self._logMsg = ""
+        self._evidence = ""
+        self._toLog = False
+        self._partial_cookie_flag = False
+        self._base64Flag = False
+        self._xcontentFlag = False
+        self._unencryptedChannelFlag = False
+        self._cookieFlag = False
+        self._serverInfoFlag = False
+        
+    def storeLog(self,message):
+        log = LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl(), self._logMsg,self._evidence, self._unencryptedChannelFlag,self._base64Flag,self._xcontentFlag,self._cookieFlag, self._serverInfoFlag)
+        self._logModel.setValueAt(log, self._row, self._row)
+        self._stdout.println(log._logMsg)
+        self.resetLogMsg()
         
     #
     # Log the HTTPMessage if falls into requirements
     #
-    def logMessage(self, message):
-        row = self._log.size()
-        
+    def logMessage(self, message):    
+        self.resetLogMsg()
         requestInfo = self._helpers.analyzeRequest(message.messageInfo.getHttpService() , message.messageInfo.getRequest())
         responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
         cookieInfo = responseInfo.getCookies()
         requestHeaderList = requestInfo.getHeaders()
         respondHeaderList = responseInfo.getHeaders()
-        toLog = False
-        logMsg = ""
         inner_sec_flag = False
-        partial_cookie_msg = ""
         partial_cookie_flag = False
+        partial_cookie_msg = ""
         
-        
-        # Capture Port 80 Request   
+        # Capture Port 80 Request (17)
         if (message.getMessageInfo().getHttpService().getPort() == 80 and self._httpRequestFlag == False):
-            logMsg += "[+] Send on 80 :" + message.getMessageInfo().getHttpService().getHost() + "\n"
-            toLog = True
-            #self._httpRequestFlag = True
+            self._logMsg += "[+] Send on 80 :" + message.getMessageInfo().getHttpService().getHost() + "\n"
+            self._toLog = True
+            self._httpRequestFlag = True
             
             if responseInfo.getStatusCode() < 300 and responseInfo.getStatusCode() >= 200:
-                logMsg += "[+] Server Return 2xx Success Message from a HTTP Request detected, potential sensitive information being transmitted over non-SSL connections\n"
+                self._logMsg += "[+] Server Return 2xx Success Message from a HTTP Request detected, potential sensitive information being transmitted over non-SSL connections\n"
             elif ((responseInfo.getStatusCode() == 302) or (responseInfo.getStatusCode() == 301) or (responseInfo.getStatusCode() == 304) ) :
-                logMsg += "[+] Server Return "+ str(responseInfo.getStatusCode()) +" Redirection Message from a HTTP Request detected\n"
+                self._logMsg += "[+] Server Return "+ str(responseInfo.getStatusCode()) +" Redirection Message from a HTTP Request detected\n"
 
+            self._evidence += respondHeaderList[0] + "\n"
+            self._evidence += respondHeaderList[1] + "\n"
+            self._evidence += respondHeaderList[2] + "\n"
+            self._evidence += respondHeaderList[3] + "\n"
+            self._evidence += respondHeaderList[4] + "\n"
+                
+            if (self._toLog):
+                self._unencryptedChannelFlag  = True
+                self.storeLog(message)
+               
         
-        # Looking for Server information leakage when GET request without the host header (47)
-        # TODO        
-        
-        # Checking Request Header
+        # Checking Response Header for server info leakage (38)
+        for header in respondHeaderList: 
+            tokens = header.split(":")
+            
+            # Capture information if there is a server response header
+            if "server" in header.lower() and len(tokens[1]) != 1 and self._serverDetailFlag == False:
+                self._logMsg += "[+] Potential Server Details:" + tokens[1] + "\n"
+                self._evidence += header + "\n"
+                self._serverDetailFlag = True
+                self._toLog = True
+            
+            # Capture information if there is a server information leakage
+            if "x-powered-by" in header.lower() and len(tokens[1]) != 1:
+                self._logMsg += "[+] Web Server powered by :" + tokens[1] + "\n"
+                self._toLog = True
+                self._evidence += header + "\n"
+        if (self._toLog):
+            self._serverInfoFlag = True
+            self.storeLog(message)
+       
+        # Checking Request Header for Base64 weak authentication request(46)
         for header in requestHeaderList:
         
             # Capture if there is weak authentication header request 
@@ -445,81 +679,72 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 userCredential = text[text.find("0")+1:text.find("%3D%3D")]
                 userCredential += "=" * ((4 - len(userCredential) % 4) % 4) #ugh
                 decode = base64.b64decode(userCredential)            
-                logMsg += "[+] Basic Authentication request is being used, decoded found: " + decode + "\n"
-                toLog = True
+                self._logMsg += "[+] Basic Authentication request is being used, decoded found: " + decode + "\n"
+                self._toLog = True
                 self._basicAuthenticationFlag = True
-        
-        # Checking Response Header
+                self._base64Flag = True
+                self._evidence += header + "\n" 
+                if (self._toLog):
+                    self.storeLog(message)
+                
+        # Checking Response Header for X-Content (50)
         for header in respondHeaderList: 
             tokens = header.split(":")
-            
-            # Capture information if there is a server response header
-            if "server" in header.lower() and len(tokens[1]) != 1 and self._serverDetailFlag == False:
-                logMsg += "[+] Potential Server Details:" + tokens[1] + "\n"
-                toLog = True
-                self._serverDetailFlag = True
-            
-            # Capture information if there is a server information leakage
-            if "x-powered-by" in header.lower() and len(tokens[1]) != 1:
-                logMsg += "[+] Web Server powered by :" + tokens[1] + "\n"
-                toLog = True
-            
+        
             # Check for security headers that enforces security endpoint web browsers
             # Reference to: https://www.owasp.org/index.php/REST_Security_Cheat_Sheet
             #         
             if (self._secHeaderFlag == False):            
                 if "x-content-type-options" == tokens[0].lower():
-                    logMsg += "[+] X-Content-Type-Options header implemented\n"
+                    self._logMsg += "[+] X-Content-Type-Options header implemented\n"
                     inner_sec_flag = True
+                    self._evidence += header + "\n"
                     
                 if "x-frame-options" == tokens[0].lower():
-                    logMsg += "[+] X-Frame-Options implemented\n" 
+                    self._logMsg += "[+] X-Frame-Options implemented\n" 
                     inner_sec_flag = True
-
+                    self._evidence += header + "\n"
                 if "x-xss-protection" == tokens[0].lower():
-                    logMsg += "[+] X-xss-protection implemented\n" 
+                    self._logMsg += "[+] X-xss-protection implemented\n" 
                     inner_sec_flag = True
-
+                    self._evidence += header + "\n"
                 if "content-type" == tokens[0].lower(): 
-                    logMsg += "[+] Content-Type implemented\n"
+                    self._logMsg += "[+] Content-Type implemented\n"
                     inner_sec_flag = True
-                
-            
-            
-            # Check for cookie flag return from server.
-            if(self._cookieFlag == False and "set-cookie" in header.lower()):
-                if ("secure" in header.lower() and "httponly" in header.lower()):
-                    logMsg += "[+] Secure and HTTPOnly cookie flags are implemented\n"
-                    self._cookieFlag = True
-                    toLog = True
-                    
-                elif ("secure" in header.lower()):
-                    partial_cookie_flag = True
-                    partial_cookie_msg = "Only Secure cookie flags is implemented\n"
-                    
-                elif ("httponly" in header.lower()):
-                    partial_cookie_flag = True
-                    partial_cookie_msg = "Only HTTPOnly cookie flags is implemented\n"
-
-                    
-        if (self._cookieFlag == False):
-            if partial_cookie_flag:
-                logMsg += partial_cookie_msg
-            else:
-                logMsg += "[+] No cookie flags implemented\n"
-                
-            self._cookieFlag = True
-            toLog = True
-        
+                    self._evidence += header + "\n"
         if inner_sec_flag:
             self._secHeaderFlag = True
-            toLog = True
-        
-        
-        if(toLog):
-            log = LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl(), logMsg)
-            self._logModel.setValueAt(log, row, row)
-            self._stdout.println(log._logMsg)
+            self._xcontentFlag = True
+            self.storeLog(message)
+
+        # Checking Cookie Flag(84)
+        for header in respondHeaderList: 
+            tokens = header.split(":")
+           # Check for cookie flag return from server.
+            if(self._cookieOverallFlag == False and "set-cookie" in header.lower()):
+                if ("secure" in header.lower() and "httponly" in header.lower()):
+                    self._logMsg += "[+] Secure and HTTPOnly cookie flags are implemented\n"
+                    partial_cookie_flag = True
+                    self._evidence = header
+                    self._cookieOverallFlag  = True
+                elif ("secure" in header.lower()):
+                    partial_cookie_flag = True
+                    self._logMsg = "Only Secure cookie flags is implemented\n"
+                    self._evidence = header
+                    self._cookieOverallFlag  = True
+                elif ("httponly" in header.lower()):
+                    partial_cookie_flag = True
+                    self._logMsg = "Only HTTPOnly cookie flags is implemented\n"  
+                    self._evidence = header
+                    self._cookieOverallFlag  = True
+                else:
+                    self._logMsg += "[+] No cookie flags implemented\n"
+                    self._evidence = header
+                    self._cookieOverallFlag  = True
+                self._cookieOverallFlag = True
+                self._cookieFlag = True
+                self.storeLog(message)
+  
     #
 	# @params IParameter Type
 	#
@@ -577,7 +802,7 @@ class scanModel(AbstractTableModel):
             return 0
 
     def getColumnCount(self):
-        return 5
+        return 6
 
     def getColumnName(self, columnIndex):
         if columnIndex == 0:
@@ -590,6 +815,8 @@ class scanModel(AbstractTableModel):
             return "URL"
         if columnIndex == 4:
             return "Confidence"
+        if columnIndex == 5:
+            return "Classification"
 
         return ""
 
@@ -605,6 +832,8 @@ class scanModel(AbstractTableModel):
             return  scanEntry._url.toString()
         if columnIndex == 4:
             return  scanEntry._confidence
+        if columnIndex == 5:
+            return  scanEntry._classification
         return ""
         
     def setValueAt(self, scan, rowIndex, columnIndex):
@@ -623,8 +852,9 @@ class Table(JTable):
         # show the log entry for the selected row
         logEntry = self._extender._log.get(row)    
         self._extender._logMsgViewer.setText(logEntry._logMsg)
-        self._extender._requestViewer.setMessage(logEntry._requestResponse.getRequest(), True)
-        self._extender._responseViewer.setMessage(logEntry._requestResponse.getResponse(), False)
+        self._extender._evidenceViewer.setText(logEntry._evidence)
+        self._extender._requestViewer2.setMessage(logEntry._requestResponse.getRequest(), True)
+        self._extender._responseViewer2.setMessage(logEntry._requestResponse.getResponse(), False)
         JTable.changeSelection(self, row, col, toggle, extend)
 
 class ScanTable(JTable):
@@ -637,29 +867,39 @@ class ScanTable(JTable):
         # show the scan entry for the selected scan
         scanEntry = self._extender._scanLog.get(row)
         self._extender._scanMsgViewer.setText(scanEntry._scanMsg)
-        self._extender._requestViewer2.setMessage(scanEntry._requestResponse.getRequest(), True)
-        self._extender._responseViewer2.setMessage(scanEntry._requestResponse.getResponse(), False)
-        JTable.changeSelection2(self, row, col, toggle, extend)
+        if scanEntry._requestResponse is None:
+            self._extender._requestViewer2.setMessage("", True)
+            self._extender._responseViewer2.setMessage("", False)        
+        else:
+            self._extender._requestViewer2.setMessage(scanEntry._requestResponse.getRequest(), True)
+            self._extender._responseViewer2.setMessage(scanEntry._requestResponse.getResponse(), False)
+        JTable.changeSelection(self, row, col, toggle, extend)
     
 #
 # class to hold details of each log entry
 #
 class LogEntry:
-    def __init__(self, tool, requestResponse, url,logMsg):
+    def __init__(self, tool, requestResponse, url,logMsg, evidence, unencryptedChannelFlag,base64Flag,xcontentFlag,cookieFlag, serverInfoFlag):
         self._tool = tool
         self._requestResponse = requestResponse
         self._url = url
         self._logMsg = logMsg
-        
+        self._evidence = evidence
+        self._unencryptedChannelFlag = unencryptedChannelFlag
+        self._base64Flag = base64Flag
+        self._xcontentFlag = xcontentFlag
+        self._cookieFlag = cookieFlag
+        self._serverInfoFlag  = serverInfoFlag 
 #
 # class to hold details of each scanner entry
 #        
 class ScanEntry:
-    def __init__(self, requestResponse, severity, issueName, url, confidence, scanMsg):
+    def __init__(self, requestResponse, severity, issueName, url, confidence, scanMsg, classification):
         self._requestResponse = requestResponse
         self._severity = severity
         self._issueName = issueName
         self._url = url
         self._confidence = confidence
         self._scanMsg = scanMsg
+        self._classification = classification
                
