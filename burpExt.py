@@ -11,6 +11,7 @@ try:
     from burp import IResponseInfo
     from burp import ICookie
     from burp import IScanIssue
+    from burp import IExtensionHelpers
     from burp import IScannerListener
     from java.awt import Component
     from java.awt import GridLayout
@@ -41,18 +42,12 @@ try:
     from java.lang import System as System
     import base64
     from bs4 import BeautifulSoup
-    '''
-    import openpyxl
-    import sys
-    sys.path.append("C:\Users\winston\Desktop\burpExt\lib\poi-4.0.0.jar")
-    from org.apache.poi.hssf.usermodel import *
-    '''
     
 except ImportError as e:
     print e
     #print "Failed to load dependencies. This issue maybe caused by using an unstable Jython version."
 
-class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController, IScannerListener):
+class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController, IScannerListener, IExtensionHelpers):
     
     #
     # implement IBurpExtender
@@ -79,14 +74,16 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         
         self._sqlIssues = ["SQL injection" , "SQL injection (second order)" , "Client-side SQL injection (DOM-based)" , "Client-side SQL injection (reflected DOM-based)" , "Client-side SQL injection (stored DOM-based)" ]
         self._ldapIssues = ["LDAP injection"]
-        self._ssiIssues = ["SSI injection"]
+        self._ssiIssues = ["SSI injection", "External service interaction (DNS)" , "External service interaction (HTTP)" , "Server-side template injection" , "Server-side JavaScript code injection"]
         self._imapSmtpIssues = ["SMTP header injection"]
         self._osCommandIssues = ["OS command injection"]
         self._sourceCodeIssues = ["Source code disclosure"]
-        self._webDirIssues = ["Directory Listing & File path traversal"]
-        self._xmlFlashHTMLIssues = ["XML injection" , "XPath injection" , "HTTP response header injection" ]
+        self._webDirIssues = ["Directory listing", "File path traversal"]
+        self._xmlFlashHTMLIssues = ["XML injection" , "XPath injection" , "HTTP response header injection" , "XML external entity injection"]
         self._cacheableIssues = ["Cacheable HTTPS response"]
         self._cookieIssues = ["Cookie manipulation (DOM-based)" , "Cookie manipulation (reflected DOM-based)" , "Cookie manipulation (stored DOM-based)" , "Cookie scoped to parent domain" , "Cookie without HttpOnly flag set" ]
+        self._sensitiveCredentialIssues = ["Cleartext submission of password", "External service interaction (DNS)"]
+        self._autocompleteFormIssues = ["Password field with autocomplete enabled"]
         
         # Custom logging flags
         self._secHeaderFlag = False
@@ -94,6 +91,10 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._httpRequestFlag = False
         self._basicAuthenticationFlag = False
         self._serverDetailFlag = False 
+        self._serverErrorLeakedInfoFlag = False
+        self._corheadersFlag = False
+        self._unauthorisedDisclosureHostnameFlag = False
+        self._urlManipulationFlag = False
          
         # obtain our output stream
         self._stdout = PrintWriter(callbacks.getStdout(), True)
@@ -239,8 +240,8 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         
         # Create the checklist
         baseTemplate = 'C:\\Users\\winston\\Desktop\\baseTemplate.html'
-        newHTMLFile =  'C:\\Users\\winston\\Desktop\\Burp-Logs.html'        # DEBUG
-        # newHTMLFile = str(self._destDir) + '/Burp-Logs.html'              # Actual Implementation
+        #newHTMLFile =  'C:\\Users\\winston\\Desktop\\Burp-Logs.html'        # DEBUG
+        newHTMLFile = str(self._destDir) + '/Burp-Logs.html'              # Actual Implementation
         
         shutil.copyfile(baseTemplate, newHTMLFile)  
         # load the checklist file
@@ -285,35 +286,64 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             #
             # Write on checklist
             #
-            
             # unencryptedChannelFlag (17)
-            if log._unencryptedChannelFlag:
+            if log._unencryptedChannel:
                 original_string = soup.find("td", id="17e")
                 original_string.string.replace_with(log._logMsg)
                 original_string = soup.find("td", id="17f")
                 original_string.string.replace_with(log._evidence)
             
             # serverInfoFlag (38)          
-            if log._serverInfoFlag:
+            if log._serverInfo:
                 original_string = soup.find("td", id="38e")
                 original_string.string.replace_with(log._logMsg)
                 original_string = soup.find("td", id="38f")
                 original_string.string.replace_with(log._evidence)
                 
+            # serverErrorLeakedInfo (39)
+            if log. _serverErrorLeakedInfo:
+                original_string = soup.find("td", id="39e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="39f")
+                original_string.string.replace_with(log._evidence)
+                
             # base64Flag (46)          
-            if log._base64Flag:
+            if log._base64:
                 original_string = soup.find("td", id="46e")
                 original_string.string.replace_with(log._logMsg)
                 original_string = soup.find("td", id="46f")
-                original_string.string.replace_with(log._evidence)                
+                original_string.string.replace_with(log._evidence)   
+
+            # unauthorisedDisclosureHostnameFlag (47)          
+            if log._unauthorisedDisclosureHostname:
+                original_string = soup.find("td", id="47e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="47f")
+                original_string.string.replace_with(log._evidence)   
+
+            # urlManipulationFlag (48)          
+            if log._urlManipulation:
+                original_string = soup.find("td", id="48e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="48f")
+                original_string.string.replace_with(str(log._evidence))   
+          
             # xcontentFlag (50)          
-            if log._xcontentFlag:
+            if log._xcontent:
                 original_string = soup.find("td", id="50e")
                 original_string.string.replace_with(log._logMsg)
                 original_string = soup.find("td", id="50f")
-                original_string.string.replace_with(log._evidence)                
+                original_string.string.replace_with(log._evidence)       
+                
+            # corheadersFlag (51)
+            if log._corheaders:
+                original_string = soup.find("td", id="51e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="51f")
+                original_string.string.replace_with(log._evidence)  
+            
             # cookieFlag (84)          
-            if log._cookieFlag:
+            if log._cookie:
                 original_string = soup.find("td", id="84e")
                 original_string.string.replace_with(log._logMsg)
                 original_string = soup.find("td", id="84f")
@@ -332,10 +362,18 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             index += 1
             row += 1 
             
-            if scan._classification == "Web Directory Listing":
+            if scan._classification == "Cleartext submission of password":
+                original_string = soup.find("td", id="30e")
+                original_string.string.replace_with("Automated Scan detected Sensitive cleartext credentials")
+                original_string = soup.find("td", id="30f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)            
+            elif scan._classification == "Web Directory Listing":
                 original_string = soup.find("td", id="41e")
                 original_string.string.replace_with("Automated Scan detected Web Directory Issues")
-                original_string = soup.find("td", id="41f")
                 original_string = soup.find("td", id="41f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -406,7 +444,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             elif scan._classification == "OS Command":
                 original_string = soup.find("td", id="73e")
                 original_string.string.replace_with("Automated Scan detected OS Command Issues")
-                original_string = soup.find("td", id="74f")
+                original_string = soup.find("td", id="73f")
                 currentString = original_string.string
                 if currentString == "-":
                     original_string.string.replace_with("Issues detected: " + scan._issueName)
@@ -432,7 +470,16 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                     original_string.string.replace_with("Issues detected: " + scan._issueName)
                 else:
                     original_string.string.replace_with(currentString + ", " + scan._issueName)
-            
+            elif scan._classification == "Autocomplete user input form":
+                original_string = soup.find("td", id="97e")
+                original_string.string.replace_with("Automated Scan detected autocomplete user input form Issues")
+                original_string = soup.find("td", id="97f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+                
         workbook.close()
         
         
@@ -455,14 +502,15 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             host2 = "http://" + url
         try:
             scannedIssues = self._callbacks.getScanIssues(host)
-            self._stdout.println("Size of scanned issues on this url: " + str(len(scannedIssues)))
+            scannedIssues = self._callbacks.getScanIssues(host2)
 
             # Include to scope
-            self._callbacks.includeInScope(URL(host))
             self._callbacks.includeInScope(URL(host2))
+            self._callbacks.includeInScope(URL(host))
             self._stdout.println("Included in scope: " + host)
             self._stdout.println("Included in scope: " + host2)
             # Store Scan issue
+
             
             for issue in scannedIssues:
                 if issue.getIssueName() not in self._repeatedIssue:
@@ -495,6 +543,10 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                         classification = "XML/JSON/Flash/XPath/HTML/XFS Injection"
                     elif issueName in self._cacheableIssues:
                         classification = "Cacheable HTTPS response"
+                    elif issueName in self._sensitiveCredentialIssues:
+                        classification = "Cleartext submission of password"
+                    elif issueName in self._autocompleteFormIssues:
+                        classification = "Autocomplete user input form"
                     else:
                         classification = "-"
                     if len(requestResponse) == 1 :
@@ -545,6 +597,10 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 classification = "XML/JSON/Flash/XPath/HTML/XFS Injection"
             elif issueName in self._cacheableIssues:
                 classification = "Cacheable HTTPS response"
+            elif issueName in self._sensitiveCredentialIssues:
+                classification = "Cleartext submission of password"
+            elif issueName in self._autocompleteFormIssues:
+                classification = "Autocomplete user input form"
             else:
                 classification = "-"
 
@@ -572,7 +628,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
     # implement ITab
     #
     def getTabCaption(self):
-        return "Development Scanner"
+        return "GovTech PT Scanner"
    
     def getUiComponent(self):
         return self._mainTab
@@ -596,17 +652,21 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._row = self._log.size()
         self._logMsg = ""
         self._evidence = ""
+        self._flag = ""
         self._toLog = False
-        self._partial_cookie_flag = False
-        self._base64Flag = False
-        self._xcontentFlag = False
-        self._unencryptedChannelFlag = False
-        self._cookieFlag = False
-        self._serverInfoFlag = False
+        self._base64 = False
+        self._xcontent = False
+        self._unencryptedChannel = False
+        self._cookie = False
+        self._serverInfo = False
+        self._serverErrorLeakedInfo = False
+        self._corheaders = False
+        self._unauthorisedDisclosureHostname = False
+        self._urlManipulation = False
         
     def storeLog(self,message):
-        log = LogEntry(self._callbacks.TOOL_PROXY, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl(), self._logMsg,self._evidence, self._unencryptedChannelFlag,self._base64Flag,self._xcontentFlag,self._cookieFlag, self._serverInfoFlag)
-        self._logModel.setValueAt(log, self._row, self._row)
+        log = LogEntry(self._callbacks.TOOL_PROXY, self._flag, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl(), self._logMsg,self._evidence, self._unencryptedChannel,self._base64,self._xcontent, self._cookie, self._serverInfo, self._serverErrorLeakedInfo,self._corheaders,self._unauthorisedDisclosureHostname, self._urlManipulation)
+        self._logModel.setValueAt(log, self._row, self._row)    
         self._stdout.println(log._logMsg)
         self.resetLogMsg()
         
@@ -621,17 +681,14 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         requestHeaderList = requestInfo.getHeaders()
         respondHeaderList = responseInfo.getHeaders()
         inner_sec_flag = False
-        partial_cookie_flag = False
-        partial_cookie_msg = ""
         
         # Capture Port 80 Request (17)
-        if (message.getMessageInfo().getHttpService().getPort() == 80 and self._httpRequestFlag == False):
-            self._logMsg += "[+] Send on 80 :" + message.getMessageInfo().getHttpService().getHost() + "\n"
-            self._toLog = True
+        if (self._httpRequestFlag == False and message.getMessageInfo().getHttpService().getProtocol() == "http"):
+            self._logMsg += "[+] Send on   :" + message.getMessageInfo().getHttpService().getHost() + "\n"
             self._httpRequestFlag = True
             
-            if responseInfo.getStatusCode() < 300 and responseInfo.getStatusCode() >= 200:
-                self._logMsg += "[+] Server Return 2xx Success Message from a HTTP Request detected, potential sensitive information being transmitted over non-SSL connections\n"
+            if responseInfo.getStatusCode() < 300 and responseInfo.getStatusCode() == 200:
+                self._logMsg += "[+] Server Return " + str(responseInfo.getStatusCode()) + " Message from a HTTP Request detected, potential sensitive information being transmitted over non-SSL connections\n"
             elif ((responseInfo.getStatusCode() == 302) or (responseInfo.getStatusCode() == 301) or (responseInfo.getStatusCode() == 304) ) :
                 self._logMsg += "[+] Server Return "+ str(responseInfo.getStatusCode()) +" Redirection Message from a HTTP Request detected\n"
 
@@ -641,60 +698,127 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             self._evidence += respondHeaderList[3] + "\n"
             self._evidence += respondHeaderList[4] + "\n"
                 
-            if (self._toLog):
-                self._unencryptedChannelFlag  = True
-                self.storeLog(message)
-               
-        
-        # Checking Response Header for server info leakage (38)
-        for header in respondHeaderList: 
-            tokens = header.split(":")
-            
-            # Capture information if there is a server response header
-            if "server" in header.lower() and len(tokens[1]) != 1 and self._serverDetailFlag == False:
-                self._logMsg += "[+] Potential Server Details:" + tokens[1] + "\n"
-                self._evidence += header + "\n"
-                self._serverDetailFlag = True
-                self._toLog = True
-            
-            # Capture information if there is a server information leakage
-            if "x-powered-by" in header.lower() and len(tokens[1]) != 1:
-                self._logMsg += "[+] Web Server powered by :" + tokens[1] + "\n"
-                self._toLog = True
-                self._evidence += header + "\n"
-        if (self._toLog):
-            self._serverInfoFlag = True
+            self._unencryptedChannel  = True
+            self._flag = "Communication over unencrypted channel"
             self.storeLog(message)
-       
-        # Checking Request Header for Base64 weak authentication request(46)
-        for header in requestHeaderList:
-        
-            # Capture if there is weak authentication header request 
-            #       EXAMPLE:Cookie: Authorization=Basic%20dGVzdDowOThmNmJjZDQ2MjFkMzczY2FkZTRlODMyNjI3YjRmNg%3D%3D
-            #       KEY: Look for Authorization=Basic
-            #       NOTE:  %20 is equal to "" and %3D = "="
-            if self._basicAuthenticationFlag == False and "authorization=basic" in header.lower():
-                tokens = header.split(" ")
-                text = tokens[1]
-                userCredential = text[text.find("0")+1:text.find("%3D%3D")]
-                userCredential += "=" * ((4 - len(userCredential) % 4) % 4) #ugh
-                decode = base64.b64decode(userCredential)            
-                self._logMsg += "[+] Basic Authentication request is being used, decoded found: " + decode + "\n"
-                self._toLog = True
-                self._basicAuthenticationFlag = True
-                self._base64Flag = True
-                self._evidence += header + "\n" 
-                if (self._toLog):
-                    self.storeLog(message)
+               
+        # Checking Response Header for server info leakage (38)
+        if self._serverDetailFlag == False:
+            for header in respondHeaderList: 
+                tokens = header.split(":")
                 
-        # Checking Response Header for X-Content (50)
-        for header in respondHeaderList: 
-            tokens = header.split(":")
+                # Capture information if there is a server response header
+                if "server" in header.lower() and len(tokens[1]) != 1:
+                    self._logMsg += "[+] Potential Server Details:" + tokens[1] + "\n"
+                    self._evidence += header + "\n"
+                    self._serverDetailFlag = True
+                    self._toLog = True
+                
+                # Capture information if there is a server information leakage
+                if "x-powered-by" in header.lower() and len(tokens[1]) != 1:
+                    self._logMsg += "[+] Web Server powered by :" + tokens[1] + "\n"
+                    self._toLog = True
+                    self._serverDetailFlag = True
+                    self._evidence += header + "\n"
+                    
+            if (self._toLog):
+                self._serverInfo = True
+                self._flag = "Server Information Leakage"
+                self.storeLog(message)
+       
+        # Checking Response Header for server info leakage (39)
+        if self._serverErrorLeakedInfoFlag == False:
+            for header in respondHeaderList: 
+                tokens = header.split(":")
+                
+                # Capture information if there is a server response header in error form
+                if "server" in header.lower() and len(tokens[1]) != 1 and responseInfo.getStatusCode() >=500:
+                    self._logMsg += "[+] Potential Server information:" + tokens[1] +  "from server error page \n"
+                    self._evidence += respondHeaderList[0] + "\n"
+                    self._evidence += header + "\n"
+                    self._serverErrorLeakedInfoFlag = True
+                    self._serverErrorLeakedInfo = True
+                    self._flag = "Server response header from error response"
+                    self.storeLog(message)
+            
+        # Checking Request Header for Base64 weak authentication request(46)
+        if self._basicAuthenticationFlag == False:
+            for header in requestHeaderList:
+                if "authorization: basic" in header.lower():
+                    tokens = header.split(" ")
+                    encode = tokens[2]
+                    decode = self._helpers.base64Decode(encode)
+                
+                    self._logMsg += "[+] Basic Authentication request is being used\n"
+                    self._logMsg += "Encoded found: " + encode + "\n"
+                    self._logMsg += "Decoded found: " + decode + "\n"
+                    self._evidence += header + "\n"
+                    self._flag = "Base64 weak authentication request"
+                    self.__basicAuthenticationFlag = True
+                    storeLog(message)
+                
+        # Check for unauthorised disclosure of internal hostnames (47)
+        '''
+        if self._unauthorisedDisclosureHostnameFlag == False:
+            if requestHeaderList[0] == "GET / HTTP/1.0":
+                self._logMsg = "[+] Tested for unauthorised disclosure of internal hostnames"
+                
+                self._evidence += respondHeaderList[0] + "\n"
+                self._evidence += respondHeaderList[1] + "\n"
+                self._evidence += respondHeaderList[2] + "\n"
+                self._unauthorisedDisclosureHostname = True
+                self.storeLog(message)
+                self._unauthorisedDisclosureHostnameFlag = True
+        '''
         
-            # Check for security headers that enforces security endpoint web browsers
-            # Reference to: https://www.owasp.org/index.php/REST_Security_Cheat_Sheet
-            #         
-            if (self._secHeaderFlag == False):            
+        # Check for URL Manipulation (48)
+        if self._urlManipulationFlag == False and responseInfo.getStatusCode() == 302 and message.getMessageInfo().getHttpService().getProtocol() == "http":
+            
+            directory = requestInfo.getHeaders()[0].split(' ')[1]
+            
+            if directory.endswith("/") is False and "." not in directory:
+                self._urlManipulationFlag = True
+                host = "www.evil.com"
+                port = 80
+                newURL = "http://" + host + directory
+                maliciousRequest = self._helpers.buildHttpRequest(URL(newURL))
+                newRequestInfo = self._helpers.analyzeRequest(maliciousRequest)
+                newRequestHeaderList = newRequestInfo.getHeaders()
+                newResponse = self._callbacks.makeHttpRequest(host, port, False, maliciousRequest)
+                newRsponseInfo = self._helpers.analyzeResponse(newResponse)
+                newRespondHeaderList = newRsponseInfo.getHeaders()
+
+                if newRsponseInfo.getStatusCode() == 302:
+                    for header in newRespondHeaderList:
+                        location = "location: " + newURL
+                        if location in header.lower(): 
+                            self._logMsg = "[+] Manipulation of URL to redirect victim IS possible on this site"
+                            self.evidence += "REQUEST\n" + newRequestHeaderList[0] + "\n" + newRequestHeaderList[1] + "\n"
+                            self._evidence = "RESPONSE\n" + newRespondHeaderList[0] + "\n"
+                            self._evidence += header+ "\n"
+                        else:
+                            self._logMsg = "[+] Manipulation of URL to redirect victim IS NOT possible on this site"
+                            self.evidence = "REQUEST\n" + newRequestHeaderList[0] + "\n" + newRequestHeaderList[1] + "\n"
+                            self._evidence += "RESPONSE\n" + newRespondHeaderList[0] + "\n"
+                else:
+                    self._logMsg += "[+] Manipulation of URL to redirect victim IS NOT possible on this site"
+                    self._evidence = "REQUEST\n" + newRequestHeaderList[0] + "\n" + newRequestHeaderList[1] + "\n"
+                    self._evidence += "RESPONSE\n" + newRespondHeaderList[0] + "\n"
+                    
+                self._urlManipulation = True
+                self._flag = "URL Manipulation"
+                self.storeLog(message)
+                
+
+        # Checking Response Header for X-Content (50)
+        if (self._secHeaderFlag == False):  
+            for header in respondHeaderList: 
+                tokens = header.split(":")
+            
+                # Check for security headers that enforces security endpoint web browsers
+                # Reference to: https://www.owasp.org/index.php/REST_Security_Cheat_Sheet
+                #         
+                          
                 if "x-content-type-options" == tokens[0].lower():
                     self._logMsg += "[+] X-Content-Type-Options header implemented\n"
                     inner_sec_flag = True
@@ -712,52 +836,57 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                     self._logMsg += "[+] Content-Type implemented\n"
                     inner_sec_flag = True
                     self._evidence += header + "\n"
-        if inner_sec_flag:
-            self._secHeaderFlag = True
-            self._xcontentFlag = True
-            self.storeLog(message)
-
-        # Checking Cookie Flag(84)
-        for header in respondHeaderList: 
-            tokens = header.split(":")
-           # Check for cookie flag return from server.
-            if(self._cookieOverallFlag == False and "set-cookie" in header.lower()):
-                if ("secure" in header.lower() and "httponly" in header.lower()):
-                    self._logMsg += "[+] Secure and HTTPOnly cookie flags are implemented\n"
-                    partial_cookie_flag = True
-                    self._evidence = header
-                    self._cookieOverallFlag  = True
-                elif ("secure" in header.lower()):
-                    partial_cookie_flag = True
-                    self._logMsg = "Only Secure cookie flags is implemented\n"
-                    self._evidence = header
-                    self._cookieOverallFlag  = True
-                elif ("httponly" in header.lower()):
-                    partial_cookie_flag = True
-                    self._logMsg = "Only HTTPOnly cookie flags is implemented\n"  
-                    self._evidence = header
-                    self._cookieOverallFlag  = True
-                else:
-                    self._logMsg += "[+] No cookie flags implemented\n"
-                    self._evidence = header
-                    self._cookieOverallFlag  = True
-                self._cookieOverallFlag = True
-                self._cookieFlag = True
+            if inner_sec_flag:
+                self._secHeaderFlag = True
+                self._xcontent = True
+                self._flag = "X Content frame(s)"
                 self.storeLog(message)
-  
-    #
-	# @params IParameter Type
-	#
-	def paramType(self, type):
-		plist = {
-			IParameter.PARAM_BODY: '[Body]',
-			IParameter.PARAM_COOKIE: '[Cookie]',
-			IParameter.PARAM_JSON: '[Json]',
-			IParameter.PARAM_MULTIPART_ATTR: '[Multipart]',
-			IParameter.PARAM_XML: '[Xml]',
-			IParameter.PARAM_XML_ATTR: '[Xml Attr]'
-		}
-		return plist[type]
+
+        # Checking valid implementation of COR headers (51)
+        if self._corheadersFlag == False:
+            for header in respondHeaderList: 
+               if "access-control-allow-origin: *" in header.lower():
+                    self._corheaders = True
+                    self._logMsg = "[+] Invalid implementation of CORS Header\n" 
+                    self._evidence += header + "\n"
+                    self.storeLog(message)
+                    self._flag = "CORS headers"
+                    self._corheadersFlag = True
+    
+        # Checking Cookie Flag(84)
+        if self._cookieOverallFlag == False:
+            for header in respondHeaderList: 
+                tokens = header.split(":")
+               # Check for cookie flag return from server.
+                if "set-cookie" in header.lower() and self._cookieOverallFlag == False:
+                    if ("secure" in header.lower() and "httponly" in header.lower()):
+                        self._logMsg += "[+] Secure and HTTPOnly cookie flags are implemented\n"
+                        self._evidence = header
+                        self._cookieOverallFlag  = True
+                        self._toLog = True
+                    elif ("secure" in header.lower()):
+                        self._logMsg = "Only Secure cookie flags is implemented\n"
+                        self._evidence = header
+                        self._toLog = True
+                        self._cookieOverallFlag == True 
+                        
+                    elif ("httponly" in header.lower()):
+                        self._logMsg = "Only HTTPOnly cookie flags is implemented\n"  
+                        self._evidence = header
+                        self._toLog = True
+                        self._cookieOverallFlag == True 
+                        
+                    else:
+                        self._logMsg += "[+] No cookie flags implemented\n"
+                        self._evidence = header
+                        self._toLog = True
+                        self._cookieOverallFlag == True 
+                        
+                    if self._toLog == True:
+                        self._cookie = True
+                        self._flag = "Cookie Flags"
+                        self.storeLog(message)
+                        break
 
 class logModel(AbstractTableModel):
     def __init__(self, extender):
@@ -770,12 +899,14 @@ class logModel(AbstractTableModel):
             return 0
 
     def getColumnCount(self):
-        return 2
+        return 3
 
     def getColumnName(self, columnIndex):
         if columnIndex == 0:
             return "Tool"
         if columnIndex == 1:
+            return "Flag"
+        if columnIndex == 2:
             return "URL"
         return ""
 
@@ -784,7 +915,9 @@ class logModel(AbstractTableModel):
         if columnIndex == 0:
             return self._extender._callbacks.getToolName(logEntry._tool)
         if columnIndex == 1:
-            return  logEntry._url.toString()
+            return logEntry._flag
+        if columnIndex == 2:
+            return logEntry._url.toString()
         return ""
         
     def setValueAt(self, log, rowIndex, columnIndex):
@@ -853,8 +986,8 @@ class Table(JTable):
         logEntry = self._extender._log.get(row)    
         self._extender._logMsgViewer.setText(logEntry._logMsg)
         self._extender._evidenceViewer.setText(logEntry._evidence)
-        self._extender._requestViewer2.setMessage(logEntry._requestResponse.getRequest(), True)
-        self._extender._responseViewer2.setMessage(logEntry._requestResponse.getResponse(), False)
+        self._extender._requestViewer.setMessage(logEntry._requestResponse.getRequest(), True)
+        self._extender._responseViewer.setMessage(logEntry._requestResponse.getResponse(), False)
         JTable.changeSelection(self, row, col, toggle, extend)
 
 class ScanTable(JTable):
@@ -879,17 +1012,22 @@ class ScanTable(JTable):
 # class to hold details of each log entry
 #
 class LogEntry:
-    def __init__(self, tool, requestResponse, url,logMsg, evidence, unencryptedChannelFlag,base64Flag,xcontentFlag,cookieFlag, serverInfoFlag):
+    def __init__(self, tool, flag, requestResponse, url,logMsg, evidence, unencryptedChannel,base64,xcontent,cookie, serverInfo, serverErrorLeakedInfo, corheaders, unauthorisedDisclosureHostname, urlManipulation):
         self._tool = tool
+        self._flag = flag
         self._requestResponse = requestResponse
         self._url = url
         self._logMsg = logMsg
         self._evidence = evidence
-        self._unencryptedChannelFlag = unencryptedChannelFlag
-        self._base64Flag = base64Flag
-        self._xcontentFlag = xcontentFlag
-        self._cookieFlag = cookieFlag
-        self._serverInfoFlag  = serverInfoFlag 
+        self._unencryptedChannel = unencryptedChannel
+        self._base64 = base64
+        self._xcontent = xcontent
+        self._cookie = cookie
+        self._serverInfo  = serverInfo
+        self._serverErrorLeakedInfo = serverErrorLeakedInfo
+        self._corheaders = corheaders
+        self._unauthorisedDisclosureHostname = unauthorisedDisclosureHostname
+        self._urlManipulation = urlManipulation
 #
 # class to hold details of each scanner entry
 #        

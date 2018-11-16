@@ -26,7 +26,7 @@ class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
 
         
         # set our extension name
-        callbacks.setExtensionName('Test Scan')
+        callbacks.setExtensionName('Demo Basic Authentication Header')
                
         # obtain our output stream
         self._stdout = PrintWriter(callbacks.getStdout(), True)
@@ -43,7 +43,54 @@ class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
         #self.getScanIssues()
         
         self._stdout.println('Loaded Extension.')
+        
+        
+        # Craft a request with Basic Authentication
+        print "### Craft a request with Basic Authentication ###"
+        
+        host = "www.evil.com"
+        port = 80
+        directory = "/index.php"
+        craftedURL = "http://" + host + directory
+        
+        # Build reqest 
+        request = self._helpers.buildHttpRequest(URL(craftedURL))
+        requestInfo = self._helpers.analyzeRequest(request)
+        
+        print "\n### Print a crafted http request ####"
+        for header in requestInfo.getHeaders():
+            print header
 
+        self._logMsg = ""
+        self._evidence = ""
+        self._flag = ""
+        # Intercept and "apply" burp extender logic to it authorization : basic header
+        print "\n\nIntercept and 'apply' burp extender logic to it authorization : basic header"
+        for header in requestInfo.getHeaders():
+            if "authorization: basic" in header.lower():
+                tokens = header.split(" ")
+                encode = tokens[2]
+                
+                print "##### DEMO PURPOSE #######"
+                print "Base64 encoded found: " + encode
+                decode = self._helpers.base64Decode(encode)
+                print "Base 64 decoded: " + decode
+                
+                print "\n### Logging capture on Burp Extender ####"
+                self._logMsg += "[+] Basic Authentication request is being used\n"
+                self._logMsg += "Encoded found: " + encode + "\n"
+                self._logMsg += "Decoded found: " + decode + "\n"
+                
+                print self._logMsg
+                
+                print "\n### Logging Evidence on Burp Extender ####"
+                self._evidence += header + "\n"
+                self._flag = "Base64 weak authentication request"
+                print self._evidence
+                print "\n### Logging Flag on Burp Extender ####" 
+                print self._flag
+                
+        
     #
     # implement IProxyListener
     #            
