@@ -818,7 +818,6 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 # Check for security headers that enforces security endpoint web browsers
                 # Reference to: https://www.owasp.org/index.php/REST_Security_Cheat_Sheet
                 #         
-                          
                 if "x-content-type-options" == tokens[0].lower():
                     self._logMsg += "[+] X-Content-Type-Options header implemented\n"
                     inner_sec_flag = True
