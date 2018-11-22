@@ -9,6 +9,7 @@ from burp import ICookie
 from burp import IScanIssue
 from burp import IScannerListener
 from burp import IInterceptedProxyMessage
+from burp import IIntruderAttack
 from threading import Lock
 
 from java.net import URL
@@ -16,14 +17,13 @@ from java.io import PrintWriter
 
 
 
-class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
+class BurpExtender(IBurpExtender, IProxyListener, IScannerListener, IIntruderAttack):
     def registerExtenderCallbacks(self, callbacks):
        
         # keep a reference to our callbacks object
         self._callbacks = callbacks
         self._helpers = callbacks.getHelpers()
         self._lock = Lock()
-
         
         # set our extension name
         callbacks.setExtensionName('Test Scan')
@@ -33,9 +33,11 @@ class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
         self._stderr = PrintWriter(callbacks.getStderr(), True)
         
         # register ourselves as a Proxy listener
-        #callbacks.registerProxyListener(self)          # Done for now
-        #callbacks.registerScannerListener(self)
-               
+        callbacks.registerProxyListener(self)          # Done for now
+        # callbacks.registerScannerListener(self)
+        callbacks.registerIntruderPayloadGeneratorFactory(self)
+        print "Test 1"
+        print len(callbacks.getIntruderPayloadGeneratorFactories())
         # AUTO ADD TO SCOPE ------- TESTING PURPOSE ONLY
         #callbacks.includeInScope(URL("https://202.176.197.54"))
         #callbacks.includeInScope(URL("https://stg-home.singpass.gov.sg"))

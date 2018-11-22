@@ -13,6 +13,7 @@ try:
     from burp import IScanIssue
     from burp import IExtensionHelpers
     from burp import IScannerListener
+    from burp import IIntruderAttack
     from java.awt import Component
     from java.awt import GridLayout
     from java.io import PrintWriter
@@ -47,7 +48,7 @@ except ImportError as e:
     print e
     #print "Failed to load dependencies. This issue maybe caused by using an unstable Jython version."
 
-class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController, IScannerListener, IExtensionHelpers):
+class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController, IScannerListener, IExtensionHelpers, IIntruderAttack):
     
     #
     # implement IBurpExtender
