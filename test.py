@@ -60,11 +60,7 @@ class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
             response = self._callbacks.makeHttpRequest(host, port, False, request)
             responseInfo = self._helpers.analyzeResponse(response)
             print responseInfo.getStatusCode()
-            
-            
-            
-            
-            
+                    
     def getScanIssues(self):
         scannedIssues = self._callbacks.getScanIssues("http://204.197.157.18:8080")
         self._stdout.println("Size of scanned issues on this url: " + str(len(scannedIssues)))
@@ -78,8 +74,7 @@ class BurpExtender(IBurpExtender, IProxyListener, IScannerListener):
                 self._stdout.println("Issue Name: " + issue.getIssueName())
                 repeatedIssue.append(issue.getIssueName())
                 self._stdout.println()
-
-          
+       
     # implement IscannerListener
     def newScanIssue(self, issue):
         self._stdout.println("Severity: " + issue.getSeverity())

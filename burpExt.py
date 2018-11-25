@@ -84,7 +84,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._cookieIssues = ["Cookie manipulation (DOM-based)" , "Cookie manipulation (reflected DOM-based)" , "Cookie manipulation (stored DOM-based)" , "Cookie scoped to parent domain" , "Cookie without HttpOnly flag set" ]
         self._sensitiveCredentialIssues = ["Cleartext submission of password", "External service interaction (DNS)"]
         self._autocompleteFormIssues = ["Password field with autocomplete enabled"]
-        
+            
         # Custom logging flags
         self._secHeaderFlag = False
         self._cookieOverallFlag = False
@@ -95,7 +95,10 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._corheadersFlag = False
         self._unauthorisedDisclosureHostnameFlag = False
         self._urlManipulationFlag = False
-         
+        self._xssFlag = False
+        self._cgiFlag = False
+        self._cgiUrls = []
+        
         # obtain our output stream
         self._stdout = PrintWriter(callbacks.getStdout(), True)
         self._stderr = PrintWriter(callbacks.getStderr(), True)
@@ -177,8 +180,6 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._scanningSplitpane.setRightComponent(scannerTabs)
         self._mainTab.addTab("Scanner Logs", self._scanningSplitpane)
         #################################################################
-
-
 
         ################### Tab for Report Generation ################### 
         self._reportGenSplitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
@@ -625,15 +626,6 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         return self._currentlyDisplayedItem.getResponse()
         
     #
-    # implement ITab
-    #
-    def getTabCaption(self):
-        return "GovTech PT Scanner"
-   
-    def getUiComponent(self):
-        return self._mainTab
-    
-    #
     # implement IProxyListener(boolean messageIsRequest, IInterceptedProxyMessage message)
     #               |------> IInterceptedProxyMessage to get IHttpRequestResponse use getMessageInfo()
     def processProxyMessage(self, messageIsRequest, message):
@@ -663,9 +655,11 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._corheaders = False
         self._unauthorisedDisclosureHostname = False
         self._urlManipulation = False
-        
+        self._xss = False
+        self._cgi = False
+           
     def storeLog(self,message):
-        log = LogEntry(self._callbacks.TOOL_PROXY, self._flag, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl(), self._logMsg,self._evidence, self._unencryptedChannel,self._base64,self._xcontent, self._cookie, self._serverInfo, self._serverErrorLeakedInfo,self._corheaders,self._unauthorisedDisclosureHostname, self._urlManipulation)
+        log = LogEntry(self._callbacks.TOOL_PROXY, self._flag, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl(), self._logMsg,self._evidence, self._unencryptedChannel,self._base64,self._xcontent, self._cookie, self._serverInfo, self._serverErrorLeakedInfo,self._corheaders,self._unauthorisedDisclosureHostname, self._urlManipulation, self._xss)
         self._logModel.setValueAt(log, self._row, self._row)    
         self._stdout.println(log._logMsg)
         self.resetLogMsg()
@@ -740,7 +734,26 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                     self._serverErrorLeakedInfo = True
                     self._flag = "Server response header from error response"
                     self.storeLog(message)
-            
+        
+        # Check for CGI-enabled modules (45)    # NEED TO DO TESTING
+        directory = requestInfo.getHeaders()[0].split(' ')[1]
+        if self._cgiFlag is True and 'cgi' in directory and responseInfo.getStatusCode() == 200 :
+            url = str(requestInfo.getUrl())
+            if url not in self._cgiUrls:
+                for log in LogEntry:
+                    if log._cgi is True:
+                        self._evidence += "URL: " + url + " returns " + responseInfo.getStatusCode() + "\n"
+                        self._cgiUrls.append(url)             
+        elif 'cgi' in directory and responseInfo.getStatusCode() == 200:
+            url = str(requestInfo.getUrl())
+            self._cgiUrls.append(url)
+            self._logMsg = "[+] CGI modules are enabled on this web server" 
+            self._evidence = "URL: " + url + " returns " + responseInfo.getStatusCode() + "\n"
+            self._cgi = True
+            self._cgiFlag = True
+            self._flag = "CGI Modules enabled"
+            self.storeLog(message)
+        
         # Checking Request Header for Base64 weak authentication request(46)
         if self._basicAuthenticationFlag == False:
             for header in requestHeaderList:
@@ -851,7 +864,24 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                     self.storeLog(message)
                     self._flag = "CORS headers"
                     self._corheadersFlag = True
-    
+                    
+        # Checking for xss attacks (55)
+        if self._xssFlag == False:
+            # identify if these flags are spotted on response message body
+             # <script>alert('Compromised by RT')</script>
+            # convert raw btyes to char then store to a string
+            text = ""
+            for byte in  message.messageInfo.getResponse():
+                text += chr(byte)
+                
+            if "<script>alert('compromised by rt')</script>" in text.lower():
+                self._logMsg = "[+] Site vulnerable to XSS attack"
+                self._evidence = "The following XSS attack request was sent: \n" +  requestHeaderList[0] + "\n\n and the site is vulnerable to XSS attack" 
+                self._xss = True
+                self._flag = "Cross-Site Scripting Attack"
+                self.storeLog(message)
+                self._xssFlag = True
+                                  
         # Checking Cookie Flag(84)
         if self._cookieOverallFlag == False:
             for header in respondHeaderList: 
@@ -887,6 +917,15 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                         self.storeLog(message)
                         break
 
+    #
+    # implement ITab
+    #
+    def getTabCaption(self):
+        return "GovTech PT Scanner"
+   
+    def getUiComponent(self):
+        return self._mainTab
+        
 class logModel(AbstractTableModel):
     def __init__(self, extender):
         self._extender = extender
@@ -1011,7 +1050,7 @@ class ScanTable(JTable):
 # class to hold details of each log entry
 #
 class LogEntry:
-    def __init__(self, tool, flag, requestResponse, url,logMsg, evidence, unencryptedChannel,base64,xcontent,cookie, serverInfo, serverErrorLeakedInfo, corheaders, unauthorisedDisclosureHostname, urlManipulation):
+    def __init__(self, tool, flag, requestResponse, url,logMsg, evidence, unencryptedChannel,base64,xcontent,cookie, serverInfo, serverErrorLeakedInfo, corheaders, unauthorisedDisclosureHostname, urlManipulation, xss, cgi):
         self._tool = tool
         self._flag = flag
         self._requestResponse = requestResponse
@@ -1027,6 +1066,8 @@ class LogEntry:
         self._corheaders = corheaders
         self._unauthorisedDisclosureHostname = unauthorisedDisclosureHostname
         self._urlManipulation = urlManipulation
+        self._xss = xss
+        self._cgi = cgi
 #
 # class to hold details of each scanner entry
 #        
