@@ -45,7 +45,7 @@ try:
     
 except ImportError as e:
     print e
-    #print "Failed to load dependencies. This issue maybe caused by using an unstable Jython version."
+    print "Failed to load dependencies. This issue maybe caused by using an unstable Jython version."
 
 class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController, IScannerListener, IExtensionHelpers):
     
@@ -68,22 +68,24 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._lock = Lock()
         self._repeatedIssue = []
         self._destDir = File(System.getProperty("java.io.tmpdir"))
+        self._sourceDest = File(System.getProperty("java.io.tmpdir"))
         
         # Scan Classification list
         self._xssIssues = ["JavaScript injection (DOM-based)" , "JavaScript injection (reflected DOM-based)" , "JavaScript injection (stored DOM-based)" , "Cross-site request foregery", "Cross-site scripting (DOM-based)" , "Cross-site scripting (reflected DOM-based)" , "Cross-site scripting (reflected)" , "Cross-site scripting (stored DOM-based)" , "Cross-site scripting (stored)" , "Server-side JavaScript code injection" ]
-        
         self._sqlIssues = ["SQL injection" , "SQL injection (second order)" , "Client-side SQL injection (DOM-based)" , "Client-side SQL injection (reflected DOM-based)" , "Client-side SQL injection (stored DOM-based)" ]
         self._ldapIssues = ["LDAP injection"]
         self._ssiIssues = ["SSI injection", "External service interaction (DNS)" , "External service interaction (HTTP)" , "Server-side template injection" , "Server-side JavaScript code injection"]
         self._imapSmtpIssues = ["SMTP header injection"]
         self._osCommandIssues = ["OS command injection"]
         self._sourceCodeIssues = ["Source code disclosure"]
-        self._webDirIssues = ["Directory listing", "File path traversal"]
+        self._webDirIssues = ["Directory listing"]
         self._xmlFlashHTMLIssues = ["XML injection" , "XPath injection" , "HTTP response header injection" , "XML external entity injection"]
         self._cacheableIssues = ["Cacheable HTTPS response"]
         self._cookieIssues = ["Cookie manipulation (DOM-based)" , "Cookie manipulation (reflected DOM-based)" , "Cookie manipulation (stored DOM-based)" , "Cookie scoped to parent domain" , "Cookie without HttpOnly flag set" ]
         self._sensitiveCredentialIssues = ["Cleartext submission of password", "External service interaction (DNS)"]
         self._autocompleteFormIssues = ["Password field with autocomplete enabled"]
+        self._lfiRfiIssues = ["File path traversal", "File path manipulation"]
+        self._fileUploadIssues = ["File upload functionality"]
             
         # Custom logging flags
         self._secHeaderFlag = False
@@ -98,6 +100,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._xssFlag = False
         self._cgiFlag = False
         self._cgiUrls = []
+        self._readIntruder = False
         
         # obtain our output stream
         self._stdout = PrintWriter(callbacks.getStdout(), True)
@@ -222,8 +225,8 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
     def getDirectoryPath(self, event):
         res = self._destDirChooser.showOpenDialog(None)
         if res == JFileChooser.APPROVE_OPTION:
-                self._destDir = self._destDirChooser.getSelectedFile()
-                self._destDirLabel.setText(self._destDir.getAbsolutePath())
+            self._destDir = self._destDirChooser.getSelectedFile()
+            self._destDirLabel.setText(self._destDir.getAbsolutePath())
     
     #
     # Generate report into HTML checklist and logs to excel table
@@ -308,6 +311,13 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 original_string = soup.find("td", id="39f")
                 original_string.string.replace_with(log._evidence)
                 
+            # cgiFlag (45)
+            if log. _cgi:
+                original_string = soup.find("td", id="45e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="55f")
+                original_string.string.replace_with(log._evidence)            
+                
             # base64Flag (46)          
             if log._base64:
                 original_string = soup.find("td", id="46e")
@@ -341,8 +351,15 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 original_string = soup.find("td", id="51e")
                 original_string.string.replace_with(log._logMsg)
                 original_string = soup.find("td", id="51f")
-                original_string.string.replace_with(log._evidence)  
-            
+                original_string.string.replace_with(log._evidence)
+                
+            # xssFlag (55)
+            if log._xss:
+                original_string = soup.find("td", id="55e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="55f")
+                original_string.string.replace_with(log._evidence)
+                
             # cookieFlag (84)          
             if log._cookie:
                 original_string = soup.find("td", id="84e")
@@ -365,7 +382,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             
             if scan._classification == "Cleartext submission of password":
                 original_string = soup.find("td", id="30e")
-                original_string.string.replace_with("Automated Scan detected Sensitive cleartext credentials")
+                original_string.string.replace_with("[+] Automated Scan Detected Sensitive cleartext credentials")
                 original_string = soup.find("td", id="30f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -374,7 +391,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                     original_string.string.replace_with(currentString + ", " + scan._issueName)            
             elif scan._classification == "Web Directory Listing":
                 original_string = soup.find("td", id="41e")
-                original_string.string.replace_with("Automated Scan detected Web Directory Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected Web Directory Issues")
                 original_string = soup.find("td", id="41f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -384,7 +401,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "XSS":
                 original_string = soup.find("td", id="54e")
-                original_string.string.replace_with("Automated Scan detected XSS Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected XSS Issues")
                 original_string = soup.find("td", id="54f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -394,7 +411,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "SQL":   
                 original_string = soup.find("td", id="57e")
-                original_string.string.replace_with("Automated Scan detected SQL Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected SQL Issues")
                 original_string = soup.find("td", id="57f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -404,7 +421,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "LDAP":     
                 original_string = soup.find("td", id="60e")
-                original_string.string.replace_with("Automated Scan detected LDAP Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected LDAP Issues")
                 original_string = soup.find("td", id="60f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -414,7 +431,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                         
             elif scan._classification == "XML/JSON/Flash/XPath/HTML/XFS Injection":
                 original_string = soup.find("td", id="63e")
-                original_string.string.replace_with("Automated Scan detected XML/JSON/Flash/XPath/HTML/XFS Injection Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected XML/JSON/Flash/XPath/HTML/XFS Injection Issues")
                 original_string = soup.find("td", id="63f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -424,7 +441,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "SSI":
                 original_string = soup.find("td", id="67e")
-                original_string.string.replace_with("Automated Scan detected SSI Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected SSI Issues")
                 original_string = soup.find("td", id="67f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -434,7 +451,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "IMAP/SMTP":
                 original_string = soup.find("td", id="70e")
-                original_string.string.replace_with("Automated Scan detected IMAP/SMTP Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected IMAP/SMTP Issues")
                 original_string = soup.find("td", id="70f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -444,7 +461,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "OS Command":
                 original_string = soup.find("td", id="73e")
-                original_string.string.replace_with("Automated Scan detected OS Command Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected OS Command Issues")
                 original_string = soup.find("td", id="73f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -454,7 +471,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "Sensitive Source Code":
                 original_string = soup.find("td", id="103e")
-                original_string.string.replace_with("Automated Scan detected Sensitive Source Code Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected Sensitive Source Code Issues")
                 original_string = soup.find("td", id="103f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -464,7 +481,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                         
             elif scan._classification == "Cacheable HTTPS response":
                 original_string = soup.find("td", id="105e")
-                original_string.string.replace_with("Automated Scan detected Cacheable HTTPS response Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected Cacheable HTTPS Response Issues")
                 original_string = soup.find("td", id="105f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -473,14 +490,31 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                     original_string.string.replace_with(currentString + ", " + scan._issueName)
             elif scan._classification == "Autocomplete user input form":
                 original_string = soup.find("td", id="97e")
-                original_string.string.replace_with("Automated Scan detected autocomplete user input form Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected Autocomplete User Input Form Issues")
                 original_string = soup.find("td", id="97f")
                 currentString = original_string.string
                 if currentString == "-":
                     original_string.string.replace_with("Issues detected: " + scan._issueName)
                 else:
                     original_string.string.replace_with(currentString + ", " + scan._issueName)
-                
+            elif scan._classification == "Local/Remote file inclusion":
+                original_string = soup.find("td", id="78e")
+                original_string.string.replace_with("[+] Automated Scan Detected Local/Remote File Inclusion Issues")
+                original_string = soup.find("td", id="78f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+            elif scan._classification == "File upload":
+                original_string = soup.find("td", id="116e")
+                original_string.string.replace_with("[+] Automated Scan Detected File Upload Function Issues")
+                original_string = soup.find("td", id="116f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
         workbook.close()
         
         
@@ -548,6 +582,10 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                         classification = "Cleartext submission of password"
                     elif issueName in self._autocompleteFormIssues:
                         classification = "Autocomplete user input form"
+                    elif issueName in self._lfiRfiIssues:
+                        classification = "Local/Remote file inclusion"
+                    elif issueName in self._fileUploadIssues:
+                        classification = "File upload"
                     else:
                         classification = "-"
                     if len(requestResponse) == 1 :
@@ -602,6 +640,10 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 classification = "Cleartext submission of password"
             elif issueName in self._autocompleteFormIssues:
                 classification = "Autocomplete user input form"
+            elif issueName in self._lfiRfiIssues:
+                classification = "Local/Remote file inclusion"
+            elif issueName in self._fileUploadIssues:
+                classification = "File upload"
             else:
                 classification = "-"
 
