@@ -2,6 +2,7 @@
 try:
     import xlsxwriter
     import shutil
+    import csv
     from burp import IBurpExtender
     from burp import ITab
     from burp import IProxyListener
@@ -68,7 +69,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._lock = Lock()
         self._repeatedIssue = []
         self._destDir = File(System.getProperty("java.io.tmpdir"))
-        self._sourceDest = File(System.getProperty("java.io.tmpdir"))
+        self._sourceDir = File(System.getProperty("java.io.tmpdir"))
         
         # Scan Classification list
         self._xssIssues = ["JavaScript injection (DOM-based)" , "JavaScript injection (reflected DOM-based)" , "JavaScript injection (stored DOM-based)" , "Cross-site request foregery", "Cross-site scripting (DOM-based)" , "Cross-site scripting (reflected DOM-based)" , "Cross-site scripting (reflected)" , "Cross-site scripting (stored DOM-based)" , "Cross-site scripting (stored)" , "Server-side JavaScript code injection" ]
@@ -101,6 +102,8 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._cgiFlag = False
         self._cgiUrls = []
         self._readIntruder = False
+        self._httpVerbList = ['POST','PUT','DELETE','TRACE','TRACK','CONNECT', 'PROFIND', 'PROPATCH', 'MKCOL','COPY','MOVE','LOCK','UNLOCK','VERSION-CONTROL','REPORT','CHECKOUT','CHECKIN','UNCHECKOUT','MKWORKSPACE','UPDATE','LABEL', 'MERGE', 'BASELINE-CONTROL', 'MKACTIVITY', 'ORDERPATCH','ACL','PATCH','SEARCH','ARBITARY']
+        self._httpVerbFlag = False
         
         # obtain our output stream
         self._stdout = PrintWriter(callbacks.getStdout(), True)
@@ -188,22 +191,32 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._reportGenSplitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
         
         self._reportGenComponent = JPanel()
-        self._innerPanel = JPanel(GridLayout(2,2,2,0))
+        self._innerPanel = JPanel(GridLayout(4,2,2,0))
         
-        # Todo output directory
+        # Input Intruder directory
+        self._innerPanel.add(JLabel("Intruder Import Root Directory:" , SwingConstants.RIGHT))
+        self._sourceDirChooser = JFileChooser()
+        self._sourceDirChooser.setFileSelectionMode(JFileChooser.FILES_ONLY)
+        dirPanel2 = JPanel(FlowLayout(FlowLayout.LEFT))
+        sourceDirButton = JButton("Select Import Folder ...", actionPerformed=self.getInputDirPath)
+        self._sourceDirLabel = JLabel(self._sourceDir.getAbsolutePath())
+        dirPanel2.add(sourceDirButton)
+        dirPanel2.add(self._sourceDirLabel)
+        self._innerPanel.add(dirPanel2)
+        
+        # Output Report and Checklist directory
         self._innerPanel.add(JLabel("Report Output Root Directory:" , SwingConstants.RIGHT))
-		
+
         self._destDirChooser = JFileChooser()
         self._destDirChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY)
         dirPanel = JPanel(FlowLayout(FlowLayout.LEFT))
-        destDirButton = JButton("Select folder ...", actionPerformed=self.getDirectoryPath)
+        destDirButton = JButton("Select Output Folder ...", actionPerformed=self.getOutputDirPath)
         self._destDirLabel = JLabel(self._destDir.getAbsolutePath())
         dirPanel.add(destDirButton)
         dirPanel.add(self._destDirLabel)
         self._innerPanel.add(dirPanel)
         
-        
-        # generate report
+        # generate report button
         generateButton = JButton("Generate Report" , actionPerformed=self.generateReport)
         self._innerPanel.add(generateButton);
         self._statusLabel = JLabel()
@@ -221,8 +234,15 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         # register ourselves as a Proxy listener
         callbacks.registerProxyListener(self) 
         return
+        
+    def getInputDirPath(self,event):
+        res = self._sourceDirChooser.showOpenDialog(None)
+        if res == JFileChooser.APPROVE_OPTION:
+            self._sourceDir = self._sourceDirChooser.getSelectedFile()
+            self._sourceDirLabel.setText(self._sourceDir.getAbsolutePath())
+            self._readIntruder = True
     
-    def getDirectoryPath(self, event):
+    def getOutputDirPath(self, event):
         res = self._destDirChooser.showOpenDialog(None)
         if res == JFileChooser.APPROVE_OPTION:
             self._destDir = self._destDirChooser.getSelectedFile()
@@ -297,6 +317,12 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 original_string = soup.find("td", id="17f")
                 original_string.string.replace_with(log._evidence)
             
+            # httpVerb Flag (36)
+            if log._httpVerb:
+                original_string = soup.find("td", id="36e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="36f")
+                original_string.string.replace_with(log._evidence)
             # serverInfoFlag (38)          
             if log._serverInfo:
                 original_string = soup.find("td", id="38e")
@@ -515,9 +541,25 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                     original_string.string.replace_with("Issues detected: " + scan._issueName)
                 else:
                     original_string.string.replace_with(currentString + ", " + scan._issueName)
+            
         workbook.close()
         
-        
+        if self._readIntruder is True: 
+            dangerousVerb = ""
+            evidence = ""
+            with open(str(self._sourceDir), 'rb') as csvfile:
+                reader = csv.reader(csvfile, delimiter= ';')
+                for row in reader:
+                    if "Request" not in row and "GET" not in row and "POST" not in row and "HEAD" not in row and "0" not in row :
+                        if int(row[2]) < 400:
+                            dangerousVerb += row[1] + ' returns ' + row[2] + ",\n"
+            if dangerousVerb is not "":
+                original_string = soup.find("td", id="36e")
+                original_string.string.replace_with("[+] Potential Dangerous HTTP Verb used on this site")
+                original_string = soup.find("td", id="36f")
+                original_string.string.replace_with(dangerousVerb)
+                print dangerousVerb
+            
         # save the file again
         with open(newHTMLFile, "w") as outf:
             outf.write(str(soup))
@@ -699,9 +741,10 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._urlManipulation = False
         self._xss = False
         self._cgi = False
+        self._httpVerb = False
            
     def storeLog(self,message):
-        log = LogEntry(self._callbacks.TOOL_PROXY, self._flag, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl(), self._logMsg,self._evidence, self._unencryptedChannel,self._base64,self._xcontent, self._cookie, self._serverInfo, self._serverErrorLeakedInfo,self._corheaders,self._unauthorisedDisclosureHostname, self._urlManipulation, self._xss)
+        log = LogEntry(self._callbacks.TOOL_PROXY, self._flag, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl(), self._logMsg,self._evidence, self._unencryptedChannel,self._base64,self._xcontent, self._cookie, self._serverInfo, self._serverErrorLeakedInfo,self._corheaders,self._unauthorisedDisclosureHostname, self._urlManipulation, self._xss, self._cgi, self._httpVerb)
         self._logModel.setValueAt(log, self._row, self._row)    
         self._stdout.println(log._logMsg)
         self.resetLogMsg()
@@ -737,7 +780,35 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             self._unencryptedChannel  = True
             self._flag = "Communication over unencrypted channel"
             self.storeLog(message)
-               
+       
+        # HTTP Verb(36)
+        if self._httpVerbFlag is False:
+            request = message.getMessageInfo().getRequest() # return in Byte[]
+            host =  message.getMessageInfo().getHttpService().getHost()
+            port = message.getMessageInfo().getHttpService().getPort()
+            request_string = self._helpers.bytesToString(request)
+            
+            for method in self._httpVerbList:
+                request_string2 = request_string.replace("GET", method)
+                newRequest = self._helpers.stringToBytes(request_string2) 
+                newResponse = self._callbacks.makeHttpRequest(host, port, False, newRequest)
+                newRsponseInfo = self._helpers.analyzeResponse(newResponse)
+                newRespondHeaderList = newRsponseInfo.getHeaders()            
+                newStatusCode = newRsponseInfo.getStatusCode()
+                
+                if int(newStatusCode) < 400:
+                    self._evidence += method + " returns " + str(newStatusCode) + '\n'
+            
+            if "" !=  self._evidence:
+                self._logMsg = "[+] Possible dangerous HTTP method could be used on this site"
+            else:
+                self._logMsg = "[+] No dangerous HTTP method could be used on this site"
+            self._flag = "Dangerous HTTP Method"
+            self._httpVerb = True
+            self.storeLog(message)
+            
+            self._httpVerbFlag = True
+        
         # Checking Response Header for server info leakage (38)
         if self._serverDetailFlag == False:
             for header in respondHeaderList: 
@@ -914,7 +985,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             # convert raw btyes to char then store to a string
             text = ""
             for byte in  message.messageInfo.getResponse():
-                text += chr(byte)
+                text += unichr(byte)
                 
             if "<script>alert('compromised by rt')</script>" in text.lower():
                 self._logMsg = "[+] Site vulnerable to XSS attack"
@@ -958,7 +1029,6 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                         self._flag = "Cookie Flags"
                         self.storeLog(message)
                         break
-
     #
     # implement ITab
     #
@@ -1092,7 +1162,7 @@ class ScanTable(JTable):
 # class to hold details of each log entry
 #
 class LogEntry:
-    def __init__(self, tool, flag, requestResponse, url,logMsg, evidence, unencryptedChannel,base64,xcontent,cookie, serverInfo, serverErrorLeakedInfo, corheaders, unauthorisedDisclosureHostname, urlManipulation, xss, cgi):
+    def __init__(self, tool, flag, requestResponse, url,logMsg, evidence, unencryptedChannel,base64,xcontent,cookie, serverInfo, serverErrorLeakedInfo, corheaders, unauthorisedDisclosureHostname, urlManipulation, xss, cgi, httpVerb):
         self._tool = tool
         self._flag = flag
         self._requestResponse = requestResponse
@@ -1110,6 +1180,7 @@ class LogEntry:
         self._urlManipulation = urlManipulation
         self._xss = xss
         self._cgi = cgi
+        self._httpVerb = httpVerb
 #
 # class to hold details of each scanner entry
 #        
