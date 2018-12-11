@@ -87,6 +87,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._autocompleteFormIssues = ["Password field with autocomplete enabled"]
         self._lfiRfiIssues = ["File path traversal", "File path manipulation"]
         self._fileUploadIssues = ["File upload functionality"]
+        self._csrfIssues = ["Cross-site request forgery"]
             
         # Custom logging flags
         self._secHeaderFlag = False
@@ -541,6 +542,15 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                     original_string.string.replace_with("Issues detected: " + scan._issueName)
                 else:
                     original_string.string.replace_with(currentString + ", " + scan._issueName)
+            elif scan._classification == "CSRF":
+                original_string = soup.find("td", id="94e")
+                original_string.string.replace_with("[+] Automated Scan Detected CSRF Issues")
+                original_string = soup.find("td", id="97f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
             
         workbook.close()
         
@@ -628,6 +638,8 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                         classification = "Local/Remote file inclusion"
                     elif issueName in self._fileUploadIssues:
                         classification = "File upload"
+                    elif issueName in self._csrfIssues:
+                        classification = "CSRF"
                     else:
                         classification = "-"
                     if len(requestResponse) == 1 :
@@ -686,6 +698,8 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 classification = "Local/Remote file inclusion"
             elif issueName in self._fileUploadIssues:
                 classification = "File upload"
+            elif issueName in self._csrfIssues:
+                classification = "CSRF"
             else:
                 classification = "-"
 
