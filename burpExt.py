@@ -2,6 +2,7 @@
 try:
     import xlsxwriter
     import shutil
+    import csv
     from burp import IBurpExtender
     from burp import ITab
     from burp import IProxyListener
@@ -45,7 +46,7 @@ try:
     
 except ImportError as e:
     print e
-    #print "Failed to load dependencies. This issue maybe caused by using an unstable Jython version."
+    print "Failed to load dependencies. This issue maybe caused by using an unstable Jython version."
 
 class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController, IScannerListener, IExtensionHelpers):
     
@@ -68,22 +69,25 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._lock = Lock()
         self._repeatedIssue = []
         self._destDir = File(System.getProperty("java.io.tmpdir"))
+        self._sourceDir = File(System.getProperty("java.io.tmpdir"))
         
         # Scan Classification list
         self._xssIssues = ["JavaScript injection (DOM-based)" , "JavaScript injection (reflected DOM-based)" , "JavaScript injection (stored DOM-based)" , "Cross-site request foregery", "Cross-site scripting (DOM-based)" , "Cross-site scripting (reflected DOM-based)" , "Cross-site scripting (reflected)" , "Cross-site scripting (stored DOM-based)" , "Cross-site scripting (stored)" , "Server-side JavaScript code injection" ]
-        
         self._sqlIssues = ["SQL injection" , "SQL injection (second order)" , "Client-side SQL injection (DOM-based)" , "Client-side SQL injection (reflected DOM-based)" , "Client-side SQL injection (stored DOM-based)" ]
         self._ldapIssues = ["LDAP injection"]
         self._ssiIssues = ["SSI injection", "External service interaction (DNS)" , "External service interaction (HTTP)" , "Server-side template injection" , "Server-side JavaScript code injection"]
         self._imapSmtpIssues = ["SMTP header injection"]
         self._osCommandIssues = ["OS command injection"]
         self._sourceCodeIssues = ["Source code disclosure"]
-        self._webDirIssues = ["Directory listing", "File path traversal"]
+        self._webDirIssues = ["Directory listing"]
         self._xmlFlashHTMLIssues = ["XML injection" , "XPath injection" , "HTTP response header injection" , "XML external entity injection"]
         self._cacheableIssues = ["Cacheable HTTPS response"]
         self._cookieIssues = ["Cookie manipulation (DOM-based)" , "Cookie manipulation (reflected DOM-based)" , "Cookie manipulation (stored DOM-based)" , "Cookie scoped to parent domain" , "Cookie without HttpOnly flag set" ]
         self._sensitiveCredentialIssues = ["Cleartext submission of password", "External service interaction (DNS)"]
         self._autocompleteFormIssues = ["Password field with autocomplete enabled"]
+        self._lfiRfiIssues = ["File path traversal", "File path manipulation"]
+        self._fileUploadIssues = ["File upload functionality"]
+        self._csrfIssues = ["Cross-site request forgery"]
             
         # Custom logging flags
         self._secHeaderFlag = False
@@ -98,6 +102,9 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._xssFlag = False
         self._cgiFlag = False
         self._cgiUrls = []
+        self._readIntruder = False
+        self._httpVerbList = ['POST','PUT','DELETE','TRACE','TRACK','CONNECT', 'PROFIND', 'PROPATCH', 'MKCOL','COPY','MOVE','LOCK','UNLOCK','VERSION-CONTROL','REPORT','CHECKOUT','CHECKIN','UNCHECKOUT','MKWORKSPACE','UPDATE','LABEL', 'MERGE', 'BASELINE-CONTROL', 'MKACTIVITY', 'ORDERPATCH','ACL','PATCH','SEARCH','ARBITARY']
+        self._httpVerbFlag = False
         
         # obtain our output stream
         self._stdout = PrintWriter(callbacks.getStdout(), True)
@@ -185,22 +192,32 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._reportGenSplitpane = JSplitPane(JSplitPane.VERTICAL_SPLIT)
         
         self._reportGenComponent = JPanel()
-        self._innerPanel = JPanel(GridLayout(2,2,2,0))
+        self._innerPanel = JPanel(GridLayout(4,2,2,0))
         
-        # Todo output directory
+        # Input Intruder directory
+        self._innerPanel.add(JLabel("Intruder Import Root Directory:" , SwingConstants.RIGHT))
+        self._sourceDirChooser = JFileChooser()
+        self._sourceDirChooser.setFileSelectionMode(JFileChooser.FILES_ONLY)
+        dirPanel2 = JPanel(FlowLayout(FlowLayout.LEFT))
+        sourceDirButton = JButton("Select Import Folder ...", actionPerformed=self.getInputDirPath)
+        self._sourceDirLabel = JLabel(self._sourceDir.getAbsolutePath())
+        dirPanel2.add(sourceDirButton)
+        dirPanel2.add(self._sourceDirLabel)
+        self._innerPanel.add(dirPanel2)
+        
+        # Output Report and Checklist directory
         self._innerPanel.add(JLabel("Report Output Root Directory:" , SwingConstants.RIGHT))
-		
+
         self._destDirChooser = JFileChooser()
         self._destDirChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY)
         dirPanel = JPanel(FlowLayout(FlowLayout.LEFT))
-        destDirButton = JButton("Select folder ...", actionPerformed=self.getDirectoryPath)
+        destDirButton = JButton("Select Output Folder ...", actionPerformed=self.getOutputDirPath)
         self._destDirLabel = JLabel(self._destDir.getAbsolutePath())
         dirPanel.add(destDirButton)
         dirPanel.add(self._destDirLabel)
         self._innerPanel.add(dirPanel)
         
-        
-        # generate report
+        # generate report button
         generateButton = JButton("Generate Report" , actionPerformed=self.generateReport)
         self._innerPanel.add(generateButton);
         self._statusLabel = JLabel()
@@ -218,12 +235,19 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         # register ourselves as a Proxy listener
         callbacks.registerProxyListener(self) 
         return
+        
+    def getInputDirPath(self,event):
+        res = self._sourceDirChooser.showOpenDialog(None)
+        if res == JFileChooser.APPROVE_OPTION:
+            self._sourceDir = self._sourceDirChooser.getSelectedFile()
+            self._sourceDirLabel.setText(self._sourceDir.getAbsolutePath())
+            self._readIntruder = True
     
-    def getDirectoryPath(self, event):
+    def getOutputDirPath(self, event):
         res = self._destDirChooser.showOpenDialog(None)
         if res == JFileChooser.APPROVE_OPTION:
-                self._destDir = self._destDirChooser.getSelectedFile()
-                self._destDirLabel.setText(self._destDir.getAbsolutePath())
+            self._destDir = self._destDirChooser.getSelectedFile()
+            self._destDirLabel.setText(self._destDir.getAbsolutePath())
     
     #
     # Generate report into HTML checklist and logs to excel table
@@ -294,6 +318,12 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 original_string = soup.find("td", id="17f")
                 original_string.string.replace_with(log._evidence)
             
+            # httpVerb Flag (36)
+            if log._httpVerb:
+                original_string = soup.find("td", id="36e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="36f")
+                original_string.string.replace_with(log._evidence)
             # serverInfoFlag (38)          
             if log._serverInfo:
                 original_string = soup.find("td", id="38e")
@@ -307,6 +337,13 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 original_string.string.replace_with(log._logMsg)
                 original_string = soup.find("td", id="39f")
                 original_string.string.replace_with(log._evidence)
+                
+            # cgiFlag (45)
+            if log. _cgi:
+                original_string = soup.find("td", id="45e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="55f")
+                original_string.string.replace_with(log._evidence)            
                 
             # base64Flag (46)          
             if log._base64:
@@ -341,8 +378,15 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 original_string = soup.find("td", id="51e")
                 original_string.string.replace_with(log._logMsg)
                 original_string = soup.find("td", id="51f")
-                original_string.string.replace_with(log._evidence)  
-            
+                original_string.string.replace_with(log._evidence)
+                
+            # xssFlag (55)
+            if log._xss:
+                original_string = soup.find("td", id="55e")
+                original_string.string.replace_with(log._logMsg)
+                original_string = soup.find("td", id="55f")
+                original_string.string.replace_with(log._evidence)
+                
             # cookieFlag (84)          
             if log._cookie:
                 original_string = soup.find("td", id="84e")
@@ -365,7 +409,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             
             if scan._classification == "Cleartext submission of password":
                 original_string = soup.find("td", id="30e")
-                original_string.string.replace_with("Automated Scan detected Sensitive cleartext credentials")
+                original_string.string.replace_with("[+] Automated Scan Detected Sensitive cleartext credentials")
                 original_string = soup.find("td", id="30f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -374,7 +418,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                     original_string.string.replace_with(currentString + ", " + scan._issueName)            
             elif scan._classification == "Web Directory Listing":
                 original_string = soup.find("td", id="41e")
-                original_string.string.replace_with("Automated Scan detected Web Directory Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected Web Directory Issues")
                 original_string = soup.find("td", id="41f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -384,7 +428,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "XSS":
                 original_string = soup.find("td", id="54e")
-                original_string.string.replace_with("Automated Scan detected XSS Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected XSS Issues")
                 original_string = soup.find("td", id="54f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -394,7 +438,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "SQL":   
                 original_string = soup.find("td", id="57e")
-                original_string.string.replace_with("Automated Scan detected SQL Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected SQL Issues")
                 original_string = soup.find("td", id="57f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -404,7 +448,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "LDAP":     
                 original_string = soup.find("td", id="60e")
-                original_string.string.replace_with("Automated Scan detected LDAP Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected LDAP Issues")
                 original_string = soup.find("td", id="60f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -414,7 +458,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                         
             elif scan._classification == "XML/JSON/Flash/XPath/HTML/XFS Injection":
                 original_string = soup.find("td", id="63e")
-                original_string.string.replace_with("Automated Scan detected XML/JSON/Flash/XPath/HTML/XFS Injection Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected XML/JSON/Flash/XPath/HTML/XFS Injection Issues")
                 original_string = soup.find("td", id="63f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -424,7 +468,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "SSI":
                 original_string = soup.find("td", id="67e")
-                original_string.string.replace_with("Automated Scan detected SSI Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected SSI Issues")
                 original_string = soup.find("td", id="67f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -434,7 +478,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "IMAP/SMTP":
                 original_string = soup.find("td", id="70e")
-                original_string.string.replace_with("Automated Scan detected IMAP/SMTP Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected IMAP/SMTP Issues")
                 original_string = soup.find("td", id="70f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -444,7 +488,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "OS Command":
                 original_string = soup.find("td", id="73e")
-                original_string.string.replace_with("Automated Scan detected OS Command Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected OS Command Issues")
                 original_string = soup.find("td", id="73f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -454,7 +498,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                             
             elif scan._classification == "Sensitive Source Code":
                 original_string = soup.find("td", id="103e")
-                original_string.string.replace_with("Automated Scan detected Sensitive Source Code Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected Sensitive Source Code Issues")
                 original_string = soup.find("td", id="103f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -464,7 +508,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                         
             elif scan._classification == "Cacheable HTTPS response":
                 original_string = soup.find("td", id="105e")
-                original_string.string.replace_with("Automated Scan detected Cacheable HTTPS response Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected Cacheable HTTPS Response Issues")
                 original_string = soup.find("td", id="105f")
                 currentString = original_string.string
                 if currentString == "-":
@@ -473,17 +517,59 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                     original_string.string.replace_with(currentString + ", " + scan._issueName)
             elif scan._classification == "Autocomplete user input form":
                 original_string = soup.find("td", id="97e")
-                original_string.string.replace_with("Automated Scan detected autocomplete user input form Issues")
+                original_string.string.replace_with("[+] Automated Scan Detected Autocomplete User Input Form Issues")
                 original_string = soup.find("td", id="97f")
                 currentString = original_string.string
                 if currentString == "-":
                     original_string.string.replace_with("Issues detected: " + scan._issueName)
                 else:
                     original_string.string.replace_with(currentString + ", " + scan._issueName)
-                
+            elif scan._classification == "Local/Remote file inclusion":
+                original_string = soup.find("td", id="78e")
+                original_string.string.replace_with("[+] Automated Scan Detected Local/Remote File Inclusion Issues")
+                original_string = soup.find("td", id="78f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+            elif scan._classification == "File upload":
+                original_string = soup.find("td", id="116e")
+                original_string.string.replace_with("[+] Automated Scan Detected File Upload Function Issues")
+                original_string = soup.find("td", id="116f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+            elif scan._classification == "CSRF":
+                original_string = soup.find("td", id="94e")
+                original_string.string.replace_with("[+] Automated Scan Detected CSRF Issues")
+                original_string = soup.find("td", id="97f")
+                currentString = original_string.string
+                if currentString == "-":
+                    original_string.string.replace_with("Issues detected: " + scan._issueName)
+                else:
+                    original_string.string.replace_with(currentString + ", " + scan._issueName)
+            
         workbook.close()
         
-        
+        if self._readIntruder is True: 
+            dangerousVerb = ""
+            evidence = ""
+            with open(str(self._sourceDir), 'rb') as csvfile:
+                reader = csv.reader(csvfile, delimiter= ';')
+                for row in reader:
+                    if "Request" not in row and "GET" not in row and "POST" not in row and "HEAD" not in row and "0" not in row :
+                        if int(row[2]) < 400:
+                            dangerousVerb += row[1] + ' returns ' + row[2] + ",\n"
+            if dangerousVerb is not "":
+                original_string = soup.find("td", id="36e")
+                original_string.string.replace_with("[+] Potential Dangerous HTTP Verb used on this site")
+                original_string = soup.find("td", id="36f")
+                original_string.string.replace_with(dangerousVerb)
+                print dangerousVerb
+            
         # save the file again
         with open(newHTMLFile, "w") as outf:
             outf.write(str(soup))
@@ -548,6 +634,12 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                         classification = "Cleartext submission of password"
                     elif issueName in self._autocompleteFormIssues:
                         classification = "Autocomplete user input form"
+                    elif issueName in self._lfiRfiIssues:
+                        classification = "Local/Remote file inclusion"
+                    elif issueName in self._fileUploadIssues:
+                        classification = "File upload"
+                    elif issueName in self._csrfIssues:
+                        classification = "CSRF"
                     else:
                         classification = "-"
                     if len(requestResponse) == 1 :
@@ -602,6 +694,12 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                 classification = "Cleartext submission of password"
             elif issueName in self._autocompleteFormIssues:
                 classification = "Autocomplete user input form"
+            elif issueName in self._lfiRfiIssues:
+                classification = "Local/Remote file inclusion"
+            elif issueName in self._fileUploadIssues:
+                classification = "File upload"
+            elif issueName in self._csrfIssues:
+                classification = "CSRF"
             else:
                 classification = "-"
 
@@ -657,9 +755,10 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
         self._urlManipulation = False
         self._xss = False
         self._cgi = False
+        self._httpVerb = False
            
     def storeLog(self,message):
-        log = LogEntry(self._callbacks.TOOL_PROXY, self._flag, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl(), self._logMsg,self._evidence, self._unencryptedChannel,self._base64,self._xcontent, self._cookie, self._serverInfo, self._serverErrorLeakedInfo,self._corheaders,self._unauthorisedDisclosureHostname, self._urlManipulation, self._xss)
+        log = LogEntry(self._callbacks.TOOL_PROXY, self._flag, self._callbacks.saveBuffersToTempFiles(message.getMessageInfo()), self._helpers.analyzeRequest(message.getMessageInfo()).getUrl(), self._logMsg,self._evidence, self._unencryptedChannel,self._base64,self._xcontent, self._cookie, self._serverInfo, self._serverErrorLeakedInfo,self._corheaders,self._unauthorisedDisclosureHostname, self._urlManipulation, self._xss, self._cgi, self._httpVerb)
         self._logModel.setValueAt(log, self._row, self._row)    
         self._stdout.println(log._logMsg)
         self.resetLogMsg()
@@ -695,7 +794,35 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             self._unencryptedChannel  = True
             self._flag = "Communication over unencrypted channel"
             self.storeLog(message)
-               
+       
+        # HTTP Verb(36)
+        if self._httpVerbFlag is False:
+            request = message.getMessageInfo().getRequest() # return in Byte[]
+            host =  message.getMessageInfo().getHttpService().getHost()
+            port = message.getMessageInfo().getHttpService().getPort()
+            request_string = self._helpers.bytesToString(request)
+            
+            for method in self._httpVerbList:
+                request_string2 = request_string.replace("GET", method)
+                newRequest = self._helpers.stringToBytes(request_string2) 
+                newResponse = self._callbacks.makeHttpRequest(host, port, False, newRequest)
+                newRsponseInfo = self._helpers.analyzeResponse(newResponse)
+                newRespondHeaderList = newRsponseInfo.getHeaders()            
+                newStatusCode = newRsponseInfo.getStatusCode()
+                
+                if int(newStatusCode) < 400:
+                    self._evidence += method + " returns " + str(newStatusCode) + '\n'
+            
+            if "" !=  self._evidence:
+                self._logMsg = "[+] Possible dangerous HTTP method could be used on this site"
+            else:
+                self._logMsg = "[+] No dangerous HTTP method could be used on this site"
+            self._flag = "Dangerous HTTP Method"
+            self._httpVerb = True
+            self.storeLog(message)
+            
+            self._httpVerbFlag = True
+        
         # Checking Response Header for server info leakage (38)
         if self._serverDetailFlag == False:
             for header in respondHeaderList: 
@@ -872,7 +999,7 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
             # convert raw btyes to char then store to a string
             text = ""
             for byte in  message.messageInfo.getResponse():
-                text += chr(byte)
+                text += unichr(byte)
                 
             if "<script>alert('compromised by rt')</script>" in text.lower():
                 self._logMsg = "[+] Site vulnerable to XSS attack"
@@ -916,7 +1043,6 @@ class BurpExtender(IBurpExtender, ITab, IProxyListener, IMessageEditorController
                         self._flag = "Cookie Flags"
                         self.storeLog(message)
                         break
-
     #
     # implement ITab
     #
@@ -1050,7 +1176,7 @@ class ScanTable(JTable):
 # class to hold details of each log entry
 #
 class LogEntry:
-    def __init__(self, tool, flag, requestResponse, url,logMsg, evidence, unencryptedChannel,base64,xcontent,cookie, serverInfo, serverErrorLeakedInfo, corheaders, unauthorisedDisclosureHostname, urlManipulation, xss, cgi):
+    def __init__(self, tool, flag, requestResponse, url,logMsg, evidence, unencryptedChannel,base64,xcontent,cookie, serverInfo, serverErrorLeakedInfo, corheaders, unauthorisedDisclosureHostname, urlManipulation, xss, cgi, httpVerb):
         self._tool = tool
         self._flag = flag
         self._requestResponse = requestResponse
@@ -1068,6 +1194,7 @@ class LogEntry:
         self._urlManipulation = urlManipulation
         self._xss = xss
         self._cgi = cgi
+        self._httpVerb = httpVerb
 #
 # class to hold details of each scanner entry
 #        
